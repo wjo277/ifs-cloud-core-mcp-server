@@ -1,25 +1,30 @@
 # IFS Cloud MCP Server
 
-A high-performance Model Context Protocol (MCP) server for IFS Cloud codebases, featuring enterprise-grade search capabilities powered by Tantivy search engine.
+A high-performance Model Context Protocol (MCP) server for IFS Cloud codebases, featuring enterprise-grade search capabilities powered by Tantivy search engine. **Enhanced with specialized IFS file parsers and advanced analysis tools.**
 
 ## Features
 
 ### 🚀 High-Performance Search
+
 - **Tantivy Integration**: Rust-based search engine for lightning-fast queries
 - **Large Codebase Support**: Efficiently handles 1GB+ IFS Cloud projects
 - **Sub-second Response Times**: Optimized for enterprise-scale development
 
 ### 📁 IFS Cloud File Support
-Complete support for all IFS Cloud file types:
-- `*.entity` - Entity definitions
-- `*.plsql` - PL/SQL code
-- `*.views` - Database views
-- `*.storage` - Storage configurations
-- `*.fragment` - Code fragments
-- `*.client` - Client-side code
-- `*.projection` - Data projections
+
+Complete support for all IFS Cloud file types with **specialized parsers**:
+
+- `*.entity` - Entity definitions (XML parsing)
+- `*.plsql` - PL/SQL code with function/procedure extraction
+- `*.views` - Database views (IFS DSL parsing)
+- `*.storage` - Storage configurations (table/index definitions)
+- `*.fragment` - Code fragments (mixed Marble content)
+- `*.client` - Client-side code (Marble UI parsing)
+- `*.projection` - Data projections (Marble data access parsing)
+- `*.plsvc` - PL/SQL service layer for projections
 
 ### 🔍 Advanced Search Capabilities
+
 - **Full-text Search**: Content search with relevance ranking
 - **Entity Search**: Find files containing specific IFS entities
 - **Type-based Search**: Filter by file type and extension
@@ -27,11 +32,20 @@ Complete support for all IFS Cloud file types:
 - **Similarity Search**: Find related files based on entities and dependencies
 - **Fuzzy Search**: Handle typos and partial matches
 
-### 📊 Code Intelligence
-- **Complexity Scoring**: Automated code complexity analysis
-- **Dependency Tracking**: Map relationships between files
-- **Entity Recognition**: Extract and index IFS-specific entities
-- **Performance Metrics**: File size, line count, and modification tracking
+### 📊 Code Intelligence & Analysis
+
+- **Entity Dependency Analysis**: Map relationships and dependencies between entities
+- **Override/Overtake Detection**: Find all @Override and @Overtake annotations
+- **Complexity Scoring**: Type-specific automated code complexity analysis
+- **Function/Procedure Extraction**: Identify all procedures and functions
+- **Fragment Dependency Tracking**: Map fragment includes and usage
+- **Cross-module Relationship Mapping**: Understand component interconnections
+
+### ⚙️ Configuration Management
+
+- **Persistent Core Codes Path**: Configure and remember IFS Cloud Core Codes location
+- **Automatic Indexing**: Index configured core codes with a single command
+- **Index Statistics**: Track indexing history and performance metrics
 
 ## Installation
 
@@ -110,7 +124,7 @@ mypy src/
 ## Future Roadmap
 
 - 🤖 **AI Integration**: FastAI/PyTorch for semantic search
-- 🧠 **Pattern Recognition**: ML-based code pattern detection  
+- 🧠 **Pattern Recognition**: ML-based code pattern detection
 - 📈 **Analytics**: Advanced codebase insights and metrics
 - 🔗 **IDE Integration**: VS Code and IntelliJ plugins
 

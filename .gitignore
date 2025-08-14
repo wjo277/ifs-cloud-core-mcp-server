@@ -80,3 +80,6 @@ Thumbs.db
 
 # Working directory
 _work
+
+# Test files
+ifs_cache_test/
