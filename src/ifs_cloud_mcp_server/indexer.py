@@ -56,6 +56,11 @@ class SearchResult(BaseModel):
     navigators: List[str] = []
     contexts: List[str] = []
 
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
 
 class IFSCloudTantivyIndexer:
     """High-performance Tantivy-based indexer for IFS Cloud files."""
