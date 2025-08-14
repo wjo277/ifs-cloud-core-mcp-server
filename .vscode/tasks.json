@@ -73,12 +73,7 @@
       "label": "Index Directory",
       "type": "shell",
       "command": "uv",
-      "args": [
-        "run",
-        "python",
-        "index_script.py",
-        "${input:directoryPath}"
-      ],
+      "args": ["run", "python", "index_script.py", "${input:directoryPath}"],
       "group": "build",
       "presentation": {
         "echo": true,

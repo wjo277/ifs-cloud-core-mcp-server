@@ -4,6 +4,7 @@ import os
 import hashlib
 import logging
 import json
+import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any, Union
 from dataclasses import dataclass
@@ -97,17 +98,34 @@ class IFSCloudTantivyIndexer:
     def _get_writer(self):
         """Get or create a writer instance."""
         if self._writer is None:
-            self._writer = self._index.writer(heap_size=50_000_000)  # 50MB heap
+            try:
+                self._writer = self._index.writer(heap_size=50_000_000)  # 50MB heap
+            except Exception as e:
+                logger.error(f"Failed to acquire writer: {e}")
+                raise
         return self._writer
 
     def _close_writer(self):
-        """Close the current writer instance."""
+        """Close the current writer instance and clean up lock files."""
         if self._writer is not None:
             try:
                 self._writer.rollback()
             except:
                 pass  # Ignore rollback errors
+
+            # Explicitly delete the writer to release lock
+            del self._writer
             self._writer = None
+
+            # Force garbage collection to ensure cleanup
+            import gc
+
+            gc.collect()
+
+            # Longer delay to ensure lock file is fully released
+            import time
+
+            time.sleep(1.0)  # Increased from 0.5 to 1.0 for better lock release
 
     def _commit_writer(self):
         """Commit and close the writer safely."""
@@ -574,15 +592,39 @@ class IFSCloudTantivyIndexer:
                 "hash": file_hash,
             }
 
-            # Add document to index
-            writer = self._get_writer()
+            # Add document to index - let radical retry handle failures
             try:
+                writer = self._get_writer()
                 writer.add_document(tantivy.Document(**doc))
                 logger.debug(f"Successfully added document for {file_path}")
+                success = True
+
             except Exception as e:
                 logger.error(f"Error adding document for {file_path}: {e}")
-                logger.error(f"Document keys: {list(doc.keys())}")
+
+                # Only close writer if it's a corruption or thread error
+                error_msg = str(e)
+                if (
+                    "killed" in error_msg
+                    or "worker thread" in error_msg
+                    or "thread" in error_msg.lower()
+                ):
+                    logger.info(
+                        f"Writer corruption detected, closing writer for {file_path}"
+                    )
+                    self._close_writer()
+                else:
+                    logger.info(
+                        f"Non-corruption error for {file_path}, keeping writer open"
+                    )
+
+                success = False
+
+            if not success:
                 return False
+
+            # IMPORTANT: Don't close writer here in batch processing mode
+            # The writer will be closed and committed by index_directory() after each batch
 
             # Update cache
             self._update_file_cache(file_path, file_hash)
@@ -603,13 +645,15 @@ class IFSCloudTantivyIndexer:
         directory_path: Union[str, Path],
         recursive: bool = True,
         force_reindex: bool = False,
+        batch_size: int = 250,  # Process files in batches to avoid memory issues
     ) -> Dict[str, int]:
-        """Index all supported files in a directory with intelligent caching.
+        """Index all supported files in a directory with intelligent caching and batch processing.
 
         Args:
             directory_path: Path to directory to index
             recursive: Whether to index subdirectories
             force_reindex: Force re-indexing even if files haven't changed
+            batch_size: Number of files to process in each batch
 
         Returns:
             Dictionary with indexing statistics
@@ -630,43 +674,138 @@ class IFSCloudTantivyIndexer:
 
         logger.info(f"Found {len(files)} files to index in {directory_path}")
 
-        # Index files with better error handling
-        for file_path in files:
-            try:
-                # Check cache first
-                if not force_reindex and self._is_file_cached_and_current(file_path):
-                    stats["cached"] += 1
-                    continue
+        # Track failed files for retry after successful batches
+        failed_files = []
+        retry_queue = []
 
-                success = await self.index_file(file_path, force_reindex)
-                if success:
-                    stats["indexed"] += 1
-                else:
-                    stats["skipped"] += 1
-            except Exception as e:
-                logger.error(f"Error indexing {file_path}: {e}")
-                stats["errors"] += 1
-                # Close writer on error to prevent corruption
-                self._close_writer()
-
-        # Commit changes and save cache metadata
-        try:
-            if self._commit_writer():
-                # Reload index to make new documents searchable
-                self._index.reload()
-                self._save_cache_metadata()
-                logger.info(
-                    f"Indexing complete: {stats['indexed']} indexed, "
-                    f"{stats['cached']} cached, {stats['skipped']} skipped, "
-                    f"{stats['errors']} errors"
-                )
+        # Process files in batches to avoid memory/resource exhaustion
+        batch_start = 0
+        while batch_start < len(files) or retry_queue:
+            # Determine current batch: either from main files or retry queue
+            if batch_start < len(files):
+                batch = files[batch_start : batch_start + batch_size]
+                batch_num = (batch_start // batch_size) + 1
+                total_batches = (len(files) + batch_size - 1) // batch_size
+                batch_start += batch_size
+                batch_type = "regular"
+            elif retry_queue:
+                # Process retry batch after successful regular batch
+                batch = retry_queue[:batch_size]
+                retry_queue = retry_queue[batch_size:]
+                batch_num = f"retry-{len(failed_files)}"
+                total_batches = f"(+{len(retry_queue) + len(batch)} retries)"
+                batch_type = "retry"
             else:
-                logger.error("Failed to commit changes to index")
-                stats["errors"] += 1
-        except Exception as e:
-            logger.error(f"Error during commit: {e}")
-            stats["errors"] += 1
-            self._close_writer()
+                break
+
+            logger.info(
+                f"Processing {batch_type} batch {batch_num}/{total_batches} ({len(batch)} files)"
+            )
+
+            # Process this batch
+            batch_errors = 0
+            batch_failed_files = []
+            batch_success = False
+
+            for file_path in batch:
+                try:
+                    # Check cache first
+                    if not force_reindex and self._is_file_cached_and_current(
+                        file_path
+                    ):
+                        stats["cached"] += 1
+                        continue
+
+                    success = await self.index_file(file_path, force_reindex)
+                    if success:
+                        stats["indexed"] += 1
+                    else:
+                        stats["skipped"] += 1
+                        # Track failed file for potential retry
+                        batch_failed_files.append(file_path)
+                except Exception as e:
+                    logger.error(f"Error indexing {file_path}: {e}")
+                    stats["errors"] += 1
+                    batch_errors += 1
+                    batch_failed_files.append(file_path)
+
+                    # Only close writer on corruption errors, not all errors
+                    error_msg = str(e)
+                    if (
+                        "killed" in error_msg
+                        or "worker thread" in error_msg
+                        or "thread" in error_msg.lower()
+                    ):
+                        logger.info(
+                            f"Writer corruption detected in batch, closing writer"
+                        )
+                        self._close_writer()
+
+                    # If too many errors in this batch, skip to next batch
+                    if batch_errors > batch_size // 2:
+                        logger.warning(
+                            f"Too many errors in batch {batch_num}, skipping remaining files in batch"
+                        )
+                        # Add remaining files in batch to failed list
+                        remaining_files = batch[batch.index(file_path) + 1 :]
+                        batch_failed_files.extend(remaining_files)
+                        break
+
+            # Commit this batch if we have indexed files
+            if stats["indexed"] > 0:
+                try:
+                    if self._commit_writer():
+                        logger.info(f"Batch {batch_num} committed successfully")
+                        batch_success = True
+                        # Reload index to make new documents searchable
+                        self._index.reload()
+                        self._save_cache_metadata()
+                    else:
+                        logger.error(f"Failed to commit batch {batch_num}")
+                        stats["errors"] += 1
+                except Exception as e:
+                    logger.error(f"Error committing batch {batch_num}: {e}")
+                    stats["errors"] += 1
+                    self._close_writer()
+
+            # RADICAL APPROACH: If this batch succeeded and we have failed files from previous batches,
+            # add ALL failed files to retry queue for processing after this successful batch
+            if batch_success and failed_files and batch_type == "regular":
+                retry_queue.extend(failed_files)
+                logger.info(
+                    f"🔄 Adding {len(failed_files)} failed files to retry queue after successful batch"
+                )
+                failed_files = (
+                    []
+                )  # Clear the failed files list since they're now in retry queue
+
+            # Add current batch failures to the failed files list
+            if batch_failed_files:
+                if batch_type == "retry":
+                    # If retry batch failed, put files back at end of failed list
+                    failed_files.extend(batch_failed_files)
+                    logger.warning(
+                        f"⚠️ Retry batch failed, {len(batch_failed_files)} files remain in failed queue"
+                    )
+                else:
+                    # Regular batch failures go to failed list
+                    failed_files.extend(batch_failed_files)
+                    logger.info(
+                        f"📝 {len(batch_failed_files)} files from batch {batch_num} added to failed list"
+                    )
+
+        # Report final failed files
+        if failed_files:
+            logger.warning(
+                f"⚠️ {len(failed_files)} files could not be indexed after all retry attempts"
+            )
+            stats["final_failures"] = len(failed_files)
+
+        logger.info(
+            f"Indexing complete: {stats['indexed']} indexed, "
+            f"{stats['cached']} cached, {stats['skipped']} skipped, "
+            f"{stats['errors']} errors"
+        )
 
         return stats
 
