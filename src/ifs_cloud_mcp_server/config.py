@@ -2,6 +2,8 @@
 
 import json
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, asdict
@@ -33,11 +35,31 @@ class ConfigManager:
             config_path: Path to the configuration file
         """
         if config_path is None:
-            config_path = Path.home() / ".ifs_cloud_mcp" / "config.json"
+            config_path = self._get_default_config_path()
 
         self.config_path = config_path
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self._config = self._load_config()
+
+    def _get_default_config_path(self) -> Path:
+        """Get the platform-appropriate default configuration path."""
+        app_name = "ifs_cloud_mcp_server"
+
+        if sys.platform == "win32":
+            # Windows: %APPDATA%/ifs_cloud_mcp_server
+            base_path = Path(
+                os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")
+            )
+        elif sys.platform == "darwin":
+            # macOS: ~/Library/Application Support/ifs_cloud_mcp_server
+            base_path = Path.home() / "Library" / "Application Support"
+        else:
+            # Linux/Unix: ~/.local/share/ifs_cloud_mcp_server
+            base_path = Path(
+                os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
+            )
+
+        return base_path / app_name / "config.json"
 
     def _load_config(self) -> IFSCloudConfig:
         """Load configuration from file."""
