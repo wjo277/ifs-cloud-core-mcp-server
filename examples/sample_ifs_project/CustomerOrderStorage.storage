@@ -1,0 +1,313 @@
+storage CustomerOrderStorage {
+
+   ----------------------------------- TABLES -----------------------------------
+
+   table CustomerOrder {
+      tablespace = IFSAPP_DATA;
+      
+      column OrderNo {
+         datatype = NUMBER(10);
+         not_null = true;
+         comment = "Unique order identifier";
+      }
+      
+      column CustomerNo {
+         datatype = VARCHAR2(20);
+         not_null = true;
+         comment = "Customer identifier";
+      }
+      
+      column OrderDate {
+         datatype = DATE;
+         not_null = true;
+         default = "sysdate";
+         comment = "Date when order was created";
+      }
+      
+      column Description {
+         datatype = VARCHAR2(200);
+         comment = "Order description";
+      }
+      
+      column Status {
+         datatype = VARCHAR2(20);
+         not_null = true;
+         default = "PENDING";
+         comment = "Current order status";
+         check = "Status IN ('PENDING', 'CONFIRMED', 'DELIVERED', 'CANCELLED')";
+      }
+      
+      column TotalAmount {
+         datatype = NUMBER(12,2);
+         not_null = true;
+         default = 0;
+         comment = "Total order amount";
+         check = "TotalAmount >= 0";
+      }
+      
+      column Currency {
+         datatype = VARCHAR2(3);
+         not_null = true;
+         default = "USD";
+         comment = "Order currency";
+      }
+      
+      column SalesmanNo {
+         datatype = VARCHAR2(20);
+         comment = "Assigned salesman";
+      }
+      
+      column OrderType {
+         datatype = VARCHAR2(20);
+         not_null = true;
+         default = "STANDARD";
+         comment = "Type of order";
+         check = "OrderType IN ('STANDARD', 'EXPRESS', 'BULK', 'SAMPLE')";
+      }
+      
+      column CreatedBy {
+         datatype = VARCHAR2(30);
+         not_null = true;
+         default = "USER";
+         comment = "User who created the order";
+      }
+      
+      column CreatedDate {
+         datatype = DATE;
+         not_null = true;
+         default = "sysdate";
+         comment = "Timestamp when order was created";
+      }
+      
+      column ModifiedBy {
+         datatype = VARCHAR2(30);
+         default = "USER";
+         comment = "User who last modified the order";
+      }
+      
+      column ModifiedDate {
+         datatype = DATE;
+         default = "sysdate";
+         comment = "Timestamp when order was last modified";
+      }
+      
+      column RowVersion {
+         datatype = DATE;
+         not_null = true;
+         default = "sysdate";
+         comment = "Row version for optimistic locking";
+      }
+      
+      constraint CustomerOrderPK {
+         primary_key = (OrderNo);
+      }
+      
+      constraint CustomerOrderCustomerFK {
+         foreign_key = (CustomerNo);
+         references = Customer(CustomerNo);
+         on_delete = restrict;
+      }
+      
+      constraint CustomerOrderSalesmanFK {
+         foreign_key = (SalesmanNo);
+         references = Salesman(SalesmanNo);
+         on_delete = set_null;
+      }
+   }
+
+   table OrderLine {
+      tablespace = IFSAPP_DATA;
+      
+      column OrderNo {
+         datatype = NUMBER(10);
+         not_null = true;
+         comment = "Reference to parent order";
+      }
+      
+      column LineNo {
+         datatype = NUMBER(4);
+         not_null = true;
+         comment = "Line number within order";
+      }
+      
+      column ProductNo {
+         datatype = VARCHAR2(25);
+         not_null = true;
+         comment = "Product identifier";
+      }
+      
+      column Description {
+         datatype = VARCHAR2(200);
+         comment = "Line description";
+      }
+      
+      column Quantity {
+         datatype = NUMBER(12,2);
+         not_null = true;
+         comment = "Ordered quantity";
+         check = "Quantity > 0";
+      }
+      
+      column UnitPrice {
+         datatype = NUMBER(12,2);
+         not_null = true;
+         comment = "Unit price";
+         check = "UnitPrice >= 0";
+      }
+      
+      column LineAmount {
+         datatype = NUMBER(12,2);
+         not_null = true;
+         comment = "Total line amount";
+         check = "LineAmount >= 0";
+      }
+      
+      column DeliveryDate {
+         datatype = DATE;
+         comment = "Requested delivery date";
+      }
+      
+      column Status {
+         datatype = VARCHAR2(20);
+         not_null = true;
+         default = "PENDING";
+         comment = "Line status";
+         check = "Status IN ('PENDING', 'CONFIRMED', 'DELIVERED', 'CANCELLED')";
+      }
+      
+      column RowVersion {
+         datatype = DATE;
+         not_null = true;
+         default = "sysdate";
+         comment = "Row version for optimistic locking";
+      }
+      
+      constraint OrderLinePK {
+         primary_key = (OrderNo, LineNo);
+      }
+      
+      constraint OrderLineOrderFK {
+         foreign_key = (OrderNo);
+         references = CustomerOrder(OrderNo);
+         on_delete = cascade;
+      }
+      
+      constraint OrderLineProductFK {
+         foreign_key = (ProductNo);
+         references = Product(ProductNo);
+         on_delete = restrict;
+      }
+   }
+
+   ----------------------------------- INDEXES -----------------------------------
+
+   index CustomerOrderCustomerIX on CustomerOrder {
+      columns = (CustomerNo, OrderDate);
+      tablespace = IFSAPP_INDEX;
+      comment = "Index for customer order lookups";
+   }
+   
+   index CustomerOrderStatusIX on CustomerOrder {
+      columns = (Status, OrderDate);
+      tablespace = IFSAPP_INDEX;
+      comment = "Index for status-based queries";
+   }
+   
+   index CustomerOrderDateIX on CustomerOrder {
+      columns = (OrderDate);
+      tablespace = IFSAPP_INDEX;
+      comment = "Index for date range queries";
+   }
+   
+   index OrderLineProductIX on OrderLine {
+      columns = (ProductNo, OrderNo);
+      tablespace = IFSAPP_INDEX;
+      comment = "Index for product-based queries";
+   }
+
+   ----------------------------------- SEQUENCES -----------------------------------
+
+   sequence CustomerOrderSeq {
+      start_with = 1000000;
+      increment_by = 1;
+      cache = 20;
+      comment = "Sequence for generating order numbers";
+   }
+
+   ----------------------------------- TRIGGERS -----------------------------------
+
+   trigger CustomerOrderRowVersionTrigger on CustomerOrder {
+      before_update = true;
+      for_each_row = true;
+      
+      declare
+         old_version DATE := :OLD.RowVersion;
+      begin
+         -- Check optimistic locking
+         if :OLD.RowVersion != :NEW.RowVersion then
+            raise_application_error(-20100, 'Record has been modified by another user');
+         end if;
+         
+         -- Update modification tracking
+         :NEW.ModifiedBy := NVL(Fnd_Session_API.Get_Fnd_User, USER);
+         :NEW.ModifiedDate := sysdate;
+         :NEW.RowVersion := sysdate;
+      end;
+   }
+   
+   trigger OrderLineAmountTrigger on OrderLine {
+      before_insert_update = true;
+      for_each_row = true;
+      
+      begin
+         -- Auto-calculate line amount
+         :NEW.LineAmount := :NEW.Quantity * :NEW.UnitPrice;
+      end;
+   }
+   
+   trigger CustomerOrderTotalTrigger on OrderLine {
+      after_insert_update_delete = true;
+      for_each_row = true;
+      
+      begin
+         -- Update parent order total
+         if inserting or updating then
+            CustomerOrderAPI.UpdateOrderTotal(:NEW.OrderNo);
+         elsif deleting then
+            CustomerOrderAPI.UpdateOrderTotal(:OLD.OrderNo);
+         end if;
+      end;
+   }
+
+   ----------------------------------- GRANTS -----------------------------------
+
+   grant {
+      grantee = IFSAPP;
+      privileges = [SELECT, INSERT, UPDATE, DELETE];
+      objects = [CustomerOrder, OrderLine];
+   }
+   
+   grant {
+      grantee = IFSSYS;
+      privileges = [SELECT];
+      objects = [CustomerOrder, OrderLine];
+   }
+   
+   grant {
+      grantee = IFSAPP_READONLY;
+      privileges = [SELECT];
+      objects = [CustomerOrder, OrderLine, CustomerOrderView];
+   }
+
+   ----------------------------------- COMMENTS -----------------------------------
+
+   comment on table CustomerOrder = "Stores customer order header information";
+   comment on table OrderLine = "Stores individual line items for customer orders";
+   
+   comment on column CustomerOrder.OrderNo = "Primary key - unique order identifier";
+   comment on column CustomerOrder.Status = "Order status: PENDING, CONFIRMED, DELIVERED, CANCELLED";
+   comment on column CustomerOrder.TotalAmount = "Total monetary value of the order";
+   
+   comment on column OrderLine.LineNo = "Sequential line number within the order";
+   comment on column OrderLine.LineAmount = "Calculated as Quantity * UnitPrice";
+}

@@ -1,0 +1,141 @@
+projection CustomerOrderHandling for CustomerOrder {
+
+   entityset CustomerOrderSet for CustomerOrder {
+      supportwarnings = [true];
+      
+      attribute OrderNo;
+      attribute CustomerNo;
+      attribute OrderDate;
+      attribute Description;
+      attribute Status;
+      attribute TotalAmount;
+      attribute Currency;
+      attribute OrderType;
+      
+      reference CustomerRef(CustomerNo) to CustomerInfo(CustomerNo) {
+         label = "Customer";
+      }
+      
+      array OrderLines(OrderNo) to OrderLineHandling(OrderNo);
+      
+      action CreateOrder {
+         initialcheck implementation;
+         parameter CustomerNo Text;
+         parameter Description Text;
+         parameter OrderType Enumeration(OrderTypeEnum);
+         ludependencies = CustomerOrder;
+      }
+      
+      action ConfirmOrder {
+         initialcheck implementation;
+         parameter OrderNo Number;
+         ludependencies = CustomerOrder;
+      }
+      
+      action CancelOrder {
+         initialcheck implementation;
+         parameter OrderNo Number;
+         parameter Reason Text;
+         ludependencies = CustomerOrder;
+      }
+   }
+   
+   entityset OrderLineSet for OrderLine {
+      supportwarnings = [true];
+      
+      attribute LineNo;
+      attribute OrderNo;
+      attribute ProductNo;
+      attribute Description;
+      attribute Quantity;
+      attribute UnitPrice;
+      attribute LineAmount;
+      attribute DeliveryDate;
+      
+      reference ProductRef(ProductNo) to ProductInfo(ProductNo) {
+         label = "Product";
+      }
+      
+      reference OrderRef(OrderNo) to CustomerOrderSet(OrderNo) {
+         label = "Order";
+      }
+   }
+   
+   list CustomerOrderList for CustomerOrderSet {
+      orderby = OrderDate desc;
+      
+      field OrderNo;
+      field CustomerRef.CustomerName;
+      field OrderDate;
+      field Status;
+      field TotalAmount;
+      field Currency;
+      
+      commandgroup StatusCommands {
+         command ConfirmOrderCommand for ConfirmOrder {
+            enabled = [Status = "Pending"];
+         }
+         command CancelOrderCommand for CancelOrder {
+            enabled = [Status in ("Pending", "Confirmed")];
+         }
+      }
+      
+      commandgroup ReportCommands {
+         command PrintOrderCommand;
+         command EmailOrderCommand;
+      }
+   }
+   
+   card CustomerOrderCard for CustomerOrderSet {
+      label = "Customer Order";
+      
+      group OrderHeaderGroup {
+         label = "Order Information";
+         
+         field OrderNo;
+         field CustomerRef;
+         field OrderDate;
+         field Status {
+            emphasis Info = [Status = "Pending"];
+            emphasis Progress = [Status = "Confirmed"];
+            emphasis Success = [Status = "Delivered"];
+            emphasis Complementary = [Status = "Cancelled"];
+         }
+         field Description;
+      }
+      
+      group OrderDetailsGroup {
+         label = "Order Details";
+         
+         field TotalAmount;
+         field Currency;
+         field OrderType;
+      }
+      
+      list OrderLinesList for OrderLines(OrderNo) {
+         label = "Order Lines";
+         
+         field LineNo;
+         field ProductRef;
+         field Description;
+         field Quantity;
+         field UnitPrice;
+         field LineAmount;
+         field DeliveryDate;
+      }
+      
+      commandgroup OrderCommands {
+         command ConfirmOrderCommand for ConfirmOrder;
+         command CancelOrderCommand for CancelOrder;
+      }
+   }
+   
+   selector CustomerOrderSelector for CustomerOrderSet {
+      label = "${OrderNo} - ${CustomerRef.CustomerName}";
+      static OrderNo;
+      static CustomerRef.CustomerName;
+      static OrderDate;
+      static Status;
+      static TotalAmount;
+   }
+}

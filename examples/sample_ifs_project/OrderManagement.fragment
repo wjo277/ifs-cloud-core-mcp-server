@@ -1,0 +1,281 @@
+fragment OrderManagementFragment {
+
+   ----------------------------------- LISTS -----------------------------------
+
+   list OrderSummaryList for CustomerOrder {
+      label = "Order Summary";
+      
+      field OrderNo {
+         size = Small;
+      }
+      
+      field CustomerRef.CustomerName {
+         size = Large;
+         label = "Customer";
+      }
+      
+      field OrderDate {
+         size = Small;
+      }
+      
+      field Status {
+         size = Small;
+         emphasis Info = [Status = "Pending"];
+         emphasis Progress = [Status = "Confirmed"];
+         emphasis Success = [Status = "Delivered"];
+         emphasis Complementary = [Status = "Cancelled"];
+      }
+      
+      field TotalAmount {
+         size = Small;
+         preserveprecision = [true];
+      }
+      
+      field Currency {
+         size = Small;
+      }
+      
+      badge OrderPriorityBadge {
+         label = "Priority";
+         emphasis Info = [TotalAmount < 1000];
+         emphasis Progress = [TotalAmount between 1000 and 10000];
+         emphasis Alert = [TotalAmount > 10000];
+         style = TextOnly;
+      }
+      
+      commandgroup OrderCommands {
+         
+         command ViewOrderDetailsCommand {
+            label = "Details";
+            mode = SingleRecord;
+            icon = "view";
+         }
+         
+         command EditOrderCommand {
+            label = "Edit";
+            mode = SingleRecord;
+            enabled = [Status in ("Pending")];
+            icon = "edit";
+         }
+         
+         command ConfirmOrderCommand for ConfirmOrder {
+            label = "Confirm";
+            mode = SingleRecord;
+            enabled = [Status = "Pending"];
+            icon = "check";
+         }
+         
+         command CancelOrderCommand for CancelOrder {
+            label = "Cancel";
+            mode = SingleRecord;
+            enabled = [Status in ("Pending", "Confirmed")];
+            icon = "cancel";
+         }
+      }
+      
+      commandgroup BulkCommands {
+         
+         command BulkConfirmCommand {
+            label = "Bulk Confirm";
+            mode = SelectedRecords;
+            bulk = ConfirmOrder;
+            enabled = [Status = "Pending"];
+         }
+         
+         command ExportOrdersCommand {
+            label = "Export";
+            mode = SelectedRecords;
+         }
+      }
+   }
+
+   ----------------------------------- CARDS -----------------------------------
+
+   card OrderDetailsCard for CustomerOrder {
+      label = "Order Details";
+      
+      group OrderInfoGroup {
+         label = "Order Information";
+         
+         field OrderNo {
+            editable = [false];
+         }
+         
+         field CustomerRef {
+            size = Large;
+            searchcontext = CustomerOrderHandlingContext;
+         }
+         
+         field OrderDate {
+            editable = [Status = "Pending"];
+         }
+         
+         field Description {
+            size = Large;
+            multiline = true;
+         }
+         
+         field Status {
+            editable = [false];
+            emphasis Info = [Status = "Pending"];
+            emphasis Progress = [Status = "Confirmed"];
+            emphasis Success = [Status = "Delivered"];
+            emphasis Complementary = [Status = "Cancelled"];
+         }
+         
+         field OrderType;
+      }
+      
+      group FinancialGroup {
+         label = "Financial Information";
+         
+         field TotalAmount {
+            editable = [false];
+            preserveprecision = [true];
+         }
+         
+         field Currency;
+         
+         computedfield DiscountAmount {
+            label = "Total Discount";
+            datatype = Number;
+            value = "#{CustomerOrderAPI.GetOrderDiscount(OrderNo)}";
+         }
+         
+         computedfield NetAmount {
+            label = "Net Amount";
+            datatype = Number;
+            value = "#{TotalAmount - DiscountAmount}";
+         }
+      }
+      
+      commandgroup OrderActions {
+         
+         command SaveOrderCommand {
+            label = "Save";
+            enabled = [isDirty and Status = "Pending"];
+         }
+         
+         command ConfirmOrderCommand for ConfirmOrder {
+            enabled = [Status = "Pending"];
+         }
+         
+         command CancelOrderCommand for CancelOrder {
+            enabled = [Status in ("Pending", "Confirmed")];
+         }
+         
+         command PrintOrderCommand {
+            label = "Print";
+         }
+         
+         command EmailOrderCommand {
+            label = "Email";
+         }
+      }
+   }
+
+   ----------------------------------- SELECTORS -----------------------------------
+
+   selector OrderStatusSelector for OrderStatus {
+      label = "${Description}";
+      static Status;
+      static Description;
+   }
+   
+   selector OrderTypeSelector for OrderType {
+      label = "${Description}";
+      static OrderType;
+      static Description;
+      static IsActive;
+   }
+
+   ----------------------------------- GROUPS -----------------------------------
+
+   group OrderFilterGroup for CustomerOrderFilter {
+      label = "Filter Options";
+      
+      field FromDate {
+         label = "From Date";
+      }
+      
+      field ToDate {
+         label = "To Date";
+      }
+      
+      field StatusFilter {
+         label = "Status";
+         lovswitch = {
+            AutoFilter = [false];
+            Description = [false];
+            Id = [true];
+         }
+      }
+      
+      field CustomerFilter {
+         label = "Customer";
+         searchcontext = CustomerSearchContext;
+      }
+      
+      field MinAmount {
+         label = "Min Amount";
+      }
+      
+      field MaxAmount {
+         label = "Max Amount";
+      }
+   }
+
+   ----------------------------------- ASSISTANT -----------------------------------
+
+   assistant OrderManagementAssistant using OrderManagementService {
+      label = "Order Management Assistant";
+      
+      overview {
+         group OrderStatisticsGroup {
+            label = "Order Statistics";
+            
+            computedfield TotalPendingOrders {
+               label = "Pending Orders";
+               datatype = Number;
+               value = "#{OrderManagementService.GetPendingOrderCount()}";
+            }
+            
+            computedfield TotalConfirmedOrders {
+               label = "Confirmed Orders";
+               datatype = Number; 
+               value = "#{OrderManagementService.GetConfirmedOrderCount()}";
+            }
+            
+            computedfield TodaysOrderValue {
+               label = "Today's Order Value";
+               datatype = Number;
+               value = "#{OrderManagementService.GetTodaysOrderValue()}";
+            }
+         }
+      }
+      
+      steps {
+         step CreateNewOrderStep {
+            label = "Create New Order";
+            enabled = [true];
+            
+            group CreateOrderGroup {
+               field CustomerNo;
+               field Description;
+               field OrderType;
+            }
+            
+            command CreateOrderCommand for CreateOrder;
+         }
+         
+         step ProcessPendingOrdersStep {
+            label = "Process Pending Orders";
+            enabled = [OrderManagementService.HasPendingOrders()];
+            
+            list PendingOrdersList for OrderSummaryList {
+               filter = [Status = "Pending"];
+            }
+         }
+      }
+   }
+}

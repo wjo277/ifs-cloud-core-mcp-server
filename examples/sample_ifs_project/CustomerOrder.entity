@@ -1,0 +1,37 @@
+entity CustomerOrder {
+   key OrderNo Number;
+   
+   attribute CustomerNo varchar(20) not null;
+   attribute OrderDate date not null default sysdate;
+   attribute Description varchar(200);
+   attribute Status varchar(20) default 'PENDING';
+   attribute TotalAmount Number(12,2) default 0;
+   attribute Currency varchar(3) default 'USD';
+   attribute SalesmanNo varchar(20);
+   attribute OrderType varchar(20) default 'STANDARD';
+   
+   reference CustomerRef(CustomerNo) to Customer(CustomerNo);
+   reference SalesmanRef(SalesmanNo) to Salesman(SalesmanNo);
+   
+   array OrderLineArray(OrderNo) to OrderLine(OrderNo);
+   
+   procedure CreateOrder;
+   procedure ConfirmOrder;
+   procedure CancelOrder;
+   procedure UpdateStatus;
+   
+   function GetOrderTotal returns Number;
+   function GetOrderDiscount returns Number;
+   function IsOrderComplete returns Boolean;
+   
+   state_machine OrderState {
+      state Pending;
+      state Confirmed;
+      state Delivered;
+      state Cancelled;
+      
+      event Confirm causes Pending to Confirmed;
+      event Deliver causes Confirmed to Delivered;
+      event Cancel causes Pending to Cancelled;
+   }
+}
