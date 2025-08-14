@@ -131,13 +131,13 @@ function Show-Summary {
     [string[]]$Extensions
   )
 
-  Write-Host "`n" + "="*60 -ForegroundColor Cyan
+  Write-Host ("`n" + ("=" * 60)) -ForegroundColor Cyan
   Write-Host "EXTRACTION SUMMARY" -ForegroundColor Cyan
-  Write-Host "="*60 -ForegroundColor Cyan
+  Write-Host ("=" * 60) -ForegroundColor Cyan
   Write-Host "Source Directory: $SourcePath" -ForegroundColor White
   Write-Host "Destination Directory: $DestinationPath" -ForegroundColor White
   Write-Host "File Extensions: $($Extensions -join ', ')" -ForegroundColor White
-  Write-Host "="*60 -ForegroundColor Cyan
+  Write-Host ("=" * 60) -ForegroundColor Cyan
 }
 
 # Main execution
