@@ -51,6 +51,16 @@ function Copy-FilesWithStructure {
 
   Write-Host "Searching for files with extensions: $($Extensions -join ', ')" -ForegroundColor Green
 
+  # Check if destination directory exists and is not empty
+  if (Test-Path $DestinationRoot) {
+    $existingFiles = Get-ChildItem -Path $DestinationRoot -Recurse -File
+    if ($existingFiles.Count -gt 0) {
+      Write-Host "Error: Destination directory '$DestinationRoot' already exists and is not empty." -ForegroundColor Red
+      Write-Host "Please delete or rename the existing directory before running this script." -ForegroundColor Red
+      throw "Destination directory is not empty. Operation aborted."
+    }
+  }
+
   # Create destination directory if it doesn't exist
   if (-not (Test-Path $DestinationRoot)) {
     New-Item -ItemType Directory -Path $DestinationRoot -Force | Out-Null
@@ -77,6 +87,11 @@ function Copy-FilesWithStructure {
     try {
       # Calculate relative path from source root
       $RelativePath = $File.FullName.Substring($SourceRoot.Length).TrimStart('\', '/')
+
+      # Skip files in source/<model>/replication directories
+      if ($RelativePath -match '\\source\\[^\\]+\\replication\\' -or $RelativePath -match '/source/[^/]+/replication/') {
+        continue
+      }
 
       # Create destination path
       $DestinationPath = Join-Path $DestinationRoot $RelativePath
