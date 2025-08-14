@@ -29,7 +29,7 @@ ENV/
 .env/
 
 # IDEs
-.vscode/
+.vscode/*
 !.vscode/tasks.json
 .idea/
 *.swp
