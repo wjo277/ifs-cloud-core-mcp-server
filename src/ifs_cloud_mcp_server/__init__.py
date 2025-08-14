@@ -12,22 +12,26 @@ __all__ = []
 
 try:
     from .server import IFSCloudMCPServer
+
     __all__.append("IFSCloudMCPServer")
 except ImportError:
     pass
 
 try:
     from .indexer import IFSCloudTantivyIndexer
+
     __all__.append("IFSCloudTantivyIndexer")
 except ImportError:
     pass
 
 # Always make parsers available as they have no external dependencies
 from .parsers import IFSFileParser, ParsedFile
+
 __all__.extend(["IFSFileParser", "ParsedFile"])
 
 try:
     from .config import ConfigManager
+
     __all__.append("ConfigManager")
 except ImportError:
     pass

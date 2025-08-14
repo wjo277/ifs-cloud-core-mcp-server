@@ -26,7 +26,7 @@ The Tantivy index is already stored on disk by default, but we've enhanced it wi
 New MCP tools for cache management:
 
 1. **`get_cache_statistics`** - Detailed cache and index statistics
-2. **`cleanup_cache`** - Remove stale cache entries  
+2. **`cleanup_cache`** - Remove stale cache entries
 3. **`force_reindex_directory`** - Force re-indexing ignoring cache
 
 ## Technical Implementation
@@ -48,12 +48,14 @@ New MCP tools for cache management:
 ### Cache Logic
 
 1. **On File Index Request**:
+
    - Check if file exists in cache
    - Compare file size and modification time
    - If unchanged, skip indexing
    - If changed, re-index and update cache
 
 2. **On Directory Index**:
+
    - Process all files but use cache for unchanged files
    - Report cache hit statistics
    - Commit all changes at once for efficiency
@@ -73,7 +75,7 @@ indexer = IFSCloudTantivyIndexer("./ifs_index")
 stats = await indexer.index_directory("/path/to/ifs/codes")
 # Result: All files indexed
 
-# Second time indexing (warm start)  
+# Second time indexing (warm start)
 stats = await indexer.index_directory("/path/to/ifs/codes")
 # Result: Most files cached, only changed files re-indexed
 ```
@@ -115,7 +117,7 @@ Directory indexing completed for: /ifs/codes
 
 Statistics:
   • Files indexed: 1,250
-  • Files cached: 46,907  
+  • Files cached: 46,907
   • Files skipped: 0
   • Errors: 0
   • Recursive: true
@@ -162,6 +164,7 @@ indexer2 = IFSCloudTantivyIndexer("./project2_index")  # Cache in ./project2_ind
 ## Best Practices
 
 ### 1. Persistent Index Paths
+
 ```python
 # Good: Use consistent paths
 indexer = IFSCloudTantivyIndexer("~/.ifs_cloud_cache/main_index")
@@ -171,6 +174,7 @@ indexer = IFSCloudTantivyIndexer(f"./temp_{random_id}")
 ```
 
 ### 2. Regular Cache Cleanup
+
 ```python
 # Periodically clean stale entries
 if datetime.now().hour == 2:  # Daily at 2 AM
@@ -180,6 +184,7 @@ if datetime.now().hour == 2:  # Daily at 2 AM
 ```
 
 ### 3. Monitoring Cache Performance
+
 ```python
 stats = indexer.get_statistics()
 cache_hit_ratio = stats['cached_files'] / stats['total_documents']
@@ -217,6 +222,6 @@ The enhanced caching system provides:
 ✅ **Persistent Storage** (survives restarts)  
 ✅ **Intelligent Change Detection** (only re-index what changed)  
 ✅ **Automatic Management** (cleanup, statistics, monitoring)  
-✅ **Full MCP Integration** (exposed via tools)  
+✅ **Full MCP Integration** (exposed via tools)
 
 This makes the IFS Cloud MCP Server highly efficient for large codebases with frequent updates, ensuring that your AI development workflow remains fast and responsive even with tens of thousands of files.

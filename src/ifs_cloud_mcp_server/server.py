@@ -564,13 +564,15 @@ class IFSCloudMCPServer:
             "",
             f"Index now contains {self.indexer.get_statistics()['total_documents']} total documents.",
         ]
-        
-        if stats['cached'] > 0:
-            response_lines.extend([
-                "",
-                f"⚡ Performance: {stats['cached']} files were already cached and up-to-date!",
-                "   This significantly improved indexing speed."
-            ])
+
+        if stats["cached"] > 0:
+            response_lines.extend(
+                [
+                    "",
+                    f"⚡ Performance: {stats['cached']} files were already cached and up-to-date!",
+                    "   This significantly improved indexing speed.",
+                ]
+            )
 
         return [TextContent(type="text", text="\n".join(response_lines))]
 
@@ -851,7 +853,9 @@ Supported File Types:
         try:
             directory_path = Path(path)
             if not directory_path.exists():
-                return [TextContent(type="text", text=f"Error: Directory not found: {path}")]
+                return [
+                    TextContent(type="text", text=f"Error: Directory not found: {path}")
+                ]
 
             stats = await self.indexer.index_directory(
                 directory_path, recursive=recursive, force_reindex=True
@@ -876,7 +880,11 @@ Supported File Types:
             return [TextContent(type="text", text="\n".join(response_lines))]
 
         except Exception as e:
-            return [TextContent(type="text", text=f"Error during force re-indexing: {str(e)}")]
+            return [
+                TextContent(
+                    type="text", text=f"Error during force re-indexing: {str(e)}"
+                )
+            ]
 
     async def _handle_cleanup_cache(
         self, arguments: Dict[str, Any]
@@ -884,30 +892,31 @@ Supported File Types:
         """Handle cleaning up stale cache entries."""
         try:
             removed_count = self.indexer.cleanup_cache()
-            
+
             response_lines = [
                 "Cache Cleanup Complete",
                 "=" * 25,
                 "",
                 f"Stale entries removed: {removed_count}",
             ]
-            
+
             if removed_count > 0:
-                response_lines.extend([
-                    "",
-                    "Cache has been cleaned of entries for files that no longer exist.",
-                    "This helps improve performance and accuracy."
-                ])
+                response_lines.extend(
+                    [
+                        "",
+                        "Cache has been cleaned of entries for files that no longer exist.",
+                        "This helps improve performance and accuracy.",
+                    ]
+                )
             else:
-                response_lines.extend([
-                    "",
-                    "No stale entries found. Cache is clean!"
-                ])
+                response_lines.extend(["", "No stale entries found. Cache is clean!"])
 
             return [TextContent(type="text", text="\n".join(response_lines))]
 
         except Exception as e:
-            return [TextContent(type="text", text=f"Error during cache cleanup: {str(e)}")]
+            return [
+                TextContent(type="text", text=f"Error during cache cleanup: {str(e)}")
+            ]
 
     async def _handle_get_cache_statistics(
         self, arguments: Dict[str, Any]
@@ -915,10 +924,10 @@ Supported File Types:
         """Handle getting detailed cache and index statistics."""
         try:
             stats = self.indexer.get_statistics()
-            
+
             # Format file sizes
             def format_size(size_bytes):
-                for unit in ['B', 'KB', 'MB', 'GB']:
+                for unit in ["B", "KB", "MB", "GB"]:
                     if size_bytes < 1024:
                         return f"{size_bytes:.1f} {unit}"
                     size_bytes /= 1024
@@ -950,7 +959,11 @@ Supported File Types:
             return [TextContent(type="text", text="\n".join(response_lines))]
 
         except Exception as e:
-            return [TextContent(type="text", text=f"Error getting cache statistics: {str(e)}")]
+            return [
+                TextContent(
+                    type="text", text=f"Error getting cache statistics: {str(e)}"
+                )
+            ]
 
     async def run(self, transport_type: str = "stdio", **kwargs):
         """Run the MCP server.
