@@ -16,6 +16,34 @@ class ParsedFile:
     imports: List[str]
     metadata: Dict[str, Any]
     complexity_indicators: int
+    # Enhanced IFS Cloud frontend elements
+    pages: List[str] = None
+    lists: List[str] = None
+    groups: List[str] = None
+    entitysets: List[str] = None
+    iconsets: List[str] = None
+    trees: List[str] = None
+    navigators: List[str] = None
+    contexts: List[str] = None
+
+    def __post_init__(self):
+        """Initialize lists if None."""
+        if self.pages is None:
+            self.pages = []
+        if self.lists is None:
+            self.lists = []
+        if self.groups is None:
+            self.groups = []
+        if self.entitysets is None:
+            self.entitysets = []
+        if self.iconsets is None:
+            self.iconsets = []
+        if self.trees is None:
+            self.trees = []
+        if self.navigators is None:
+            self.navigators = []
+        if self.contexts is None:
+            self.contexts = []
 
 
 class IFSFileParser:
@@ -402,7 +430,7 @@ class IFSFileParser:
         return self._parse_client_content(content)
 
     def _parse_client_content(self, content: str) -> ParsedFile:
-        """Parse client content (used by both .client and .fragment files)."""
+        """Parse client content with enhanced IFS Cloud element extraction."""
         entities = []
         dependencies = []
         functions = []
@@ -410,48 +438,156 @@ class IFSFileParser:
         metadata = {}
         complexity_indicators = 0
 
+        # Enhanced frontend elements
+        pages = []
+        lists = []
+        groups = []
+        entitysets = []
+        iconsets = []
+        trees = []
+        navigators = []
+        contexts = []
+
         lines = content.split("\n")
 
-        # Extract client name
-        client_pattern = re.compile(r"^\s*client\s+(\w+)", re.IGNORECASE)
-        # Extract navigation entries
-        navigator_pattern = re.compile(r"^\s*navigator\s+(\w+)", re.IGNORECASE)
-        # Extract page definitions
-        page_pattern = re.compile(r"^\s*page\s+(\w+)", re.IGNORECASE)
+        # Enhanced patterns for IFS Cloud frontend elements
+        patterns = {
+            "client": re.compile(r"^\s*client\s+(\w+)", re.IGNORECASE),
+            "page": re.compile(r"^\s*page\s+(\w+)", re.IGNORECASE),
+            "list": re.compile(r"^\s*(list|treelist)\s+(\w+)", re.IGNORECASE),
+            "group": re.compile(r"^\s*group\s+(\w+)", re.IGNORECASE),
+            "navigator": re.compile(r"^\s*navigator\s+(\w+)", re.IGNORECASE),
+            "entityset": re.compile(r"^\s*entityset\s+(\w+)", re.IGNORECASE),
+            "iconset": re.compile(r"^\s*iconset\s*\{", re.IGNORECASE),
+            "tree": re.compile(r"^\s*tree\s+(\w+)", re.IGNORECASE),
+            "navicontext": re.compile(
+                r"^\s*navicontext\s*\(\s*(\w+)\s*\)", re.IGNORECASE
+            ),
+            "entity_ref": re.compile(r"^\s*entity\s+(\w+)", re.IGNORECASE),
+        }
 
-        page_count = 0
-        navigator_count = 0
+        # Icon patterns for iconset content
+        icon_patterns = {
+            "icon_def": re.compile(r'^\s*icon\s+"([^"]+)"', re.IGNORECASE),
+            "icon_expression": re.compile(
+                r"expression\s*=\s*\[([^\]]+)\]", re.IGNORECASE
+            ),
+        }
 
-        for line in lines:
-            # Extract client name
-            client_match = client_pattern.match(line)
-            if client_match:
-                entities.append(client_match.group(1))
+        current_iconset_icons = []
+        in_iconset = False
+        iconset_count = 0
 
-            # Extract navigators
-            nav_match = navigator_pattern.match(line)
-            if nav_match:
-                entities.append(nav_match.group(1))
-                navigator_count += 1
+        for line_num, line in enumerate(lines):
+            stripped = line.strip()
 
-            # Extract pages
-            page_match = page_pattern.match(line)
-            if page_match:
-                entities.append(page_match.group(1))
-                page_count += 1
+            # Track iconset blocks
+            if patterns["iconset"].match(line):
+                in_iconset = True
+                iconset_count += 1
+                current_iconset_icons = []
+                iconsets.append(f"iconset_{iconset_count}")
 
-        # Calculate complexity based on UI elements
-        ui_keywords = ["page", "list", "form", "group", "field", "action", "command"]
+            elif in_iconset and stripped == "}":
+                in_iconset = False
+                if current_iconset_icons:
+                    iconsets.extend(current_iconset_icons)
+                current_iconset_icons = []
+
+            # Extract icons within iconsets
+            if in_iconset:
+                icon_match = icon_patterns["icon_def"].match(line)
+                if icon_match:
+                    icon_name = icon_match.group(1)
+                    current_iconset_icons.append(f"icon_{icon_name}")
+
+                expr_match = icon_patterns["icon_expression"].search(line)
+                if expr_match:
+                    expression = expr_match.group(1)
+                    # Extract condition types from expressions
+                    if "ExecutionType" in expression:
+                        contexts.append(f"execution_type_condition")
+                    if "SupplyOption" in expression:
+                        contexts.append(f"supply_option_condition")
+
+            # Extract other elements
+            for pattern_name, pattern in patterns.items():
+                match = pattern.match(line)
+                if match:
+                    if pattern_name == "client":
+                        entities.append(match.group(1))
+                    elif pattern_name == "page":
+                        pages.append(match.group(1))
+                        # Don't add pages to entities - they are UI components, not database entities
+                    elif pattern_name == "list":
+                        list_type = match.group(1).lower()  # 'list' or 'treelist'
+                        list_name = match.group(2)
+                        lists.append(f"{list_type}_{list_name}")
+                        if list_type == "treelist":
+                            trees.append(list_name)
+                    elif pattern_name == "group":
+                        groups.append(match.group(1))
+                    elif pattern_name == "navigator":
+                        navigators.append(match.group(1))
+                        # Don't add navigators to entities - they are UI components, not database entities
+                    elif pattern_name == "entityset":
+                        entitysets.append(match.group(1))
+                    elif pattern_name == "tree":
+                        trees.append(match.group(1))
+                    elif pattern_name == "navicontext":
+                        contexts.append(match.group(1))
+                    elif pattern_name == "entity_ref":
+                        entities.append(match.group(1))
+
+        # Calculate enhanced complexity based on UI elements
+        ui_keywords = [
+            "page",
+            "list",
+            "form",
+            "group",
+            "field",
+            "action",
+            "command",
+            "tree",
+            "iconset",
+            "navigator",
+            "entityset",
+        ]
         complexity_indicators = sum(
             content.lower().count(keyword) for keyword in ui_keywords
         )
 
-        metadata["page_count"] = page_count
-        metadata["navigator_count"] = navigator_count
-        metadata["is_client"] = True
+        # Enhanced metadata
+        metadata.update(
+            {
+                "page_count": len(pages),
+                "list_count": len(lists),
+                "group_count": len(groups),
+                "navigator_count": len(navigators),
+                "entityset_count": len(entitysets),
+                "iconset_count": len([i for i in iconsets if i.startswith("iconset_")]),
+                "tree_count": len(trees),
+                "context_count": len(contexts),
+                "total_ui_elements": len(pages) + len(lists) + len(groups) + len(trees),
+                "is_client": True,
+            }
+        )
 
         return ParsedFile(
-            entities, dependencies, functions, imports, metadata, complexity_indicators
+            entities=entities,
+            dependencies=dependencies,
+            functions=functions,
+            imports=imports,
+            metadata=metadata,
+            complexity_indicators=complexity_indicators,
+            pages=pages,
+            lists=lists,
+            groups=groups,
+            entitysets=entitysets,
+            iconsets=iconsets,
+            trees=trees,
+            navigators=navigators,
+            contexts=contexts,
         )
 
     def _parse_plsvc(self, content: str) -> ParsedFile:

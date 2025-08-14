@@ -46,6 +46,14 @@ class SearchResult(BaseModel):
     logical_unit: Optional[str] = None
     entity_name: Optional[str] = None
     component: Optional[str] = None
+    pages: List[str] = []
+    lists: List[str] = []
+    groups: List[str] = []
+    entitysets: List[str] = []
+    iconsets: List[str] = []
+    trees: List[str] = []
+    navigators: List[str] = []
+    contexts: List[str] = []
 
 
 class IFSCloudTantivyIndexer:
@@ -114,6 +122,70 @@ class IFSCloudTantivyIndexer:
                 return False
         return False
 
+    def get_stats(self) -> Dict[str, Any]:
+        """Get index statistics."""
+        try:
+            searcher = self._index.searcher()
+
+            # Get total document count
+            total_docs = searcher.num_docs
+
+            # Get cache stats
+            cache_files = len(self._file_cache.get("files", {}))
+
+            # Count entities by doing a wildcard search
+            try:
+                all_results = self.search("*", limit=10000)
+                total_entities = sum(len(result.entities) for result in all_results)
+
+                # Count by file type
+                file_types = {}
+                modules = set()
+                logical_units = set()
+
+                for result in all_results:
+                    file_type = result.type
+                    file_types[file_type] = file_types.get(file_type, 0) + 1
+
+                    if result.module:
+                        modules.add(result.module)
+                    if result.logical_unit:
+                        logical_units.add(result.logical_unit)
+
+            except Exception:
+                # Fallback if search fails
+                total_entities = 0
+                file_types = {}
+                modules = set()
+                logical_units = set()
+
+            return {
+                "total_files": total_docs,
+                "total_entities": total_entities,
+                "cached_files": cache_files,
+                "supported_extensions": list(self.SUPPORTED_EXTENSIONS),
+                "file_types": file_types,
+                "modules": len(modules),
+                "logical_units": len(logical_units),
+                "index_path": str(self.index_path),
+                "cache_enabled": True,
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting stats: {e}")
+            return {
+                "total_files": 0,
+                "total_entities": 0,
+                "cached_files": 0,
+                "supported_extensions": list(self.SUPPORTED_EXTENSIONS),
+                "file_types": {},
+                "modules": 0,
+                "logical_units": 0,
+                "index_path": str(self.index_path),
+                "cache_enabled": True,
+                "error": str(e),
+            }
+
     def cleanup(self):
         """Clean up resources."""
         self._close_writer()
@@ -139,27 +211,41 @@ class IFSCloudTantivyIndexer:
         schema_builder.add_integer_field("size", stored=True, indexed=True)
         schema_builder.add_date_field("modified_time", stored=True, indexed=True)
 
-        # Content fields
-        schema_builder.add_text_field("content", stored=False)
+        # Content fields - make sure these are properly indexed for search
+        schema_builder.add_text_field("content", stored=False, index_option="position")
         schema_builder.add_text_field("content_preview", stored=True)
 
-        # IFS-specific fields
-        schema_builder.add_text_field("entities", stored=True)
-        schema_builder.add_text_field("dependencies", stored=True)
-        schema_builder.add_text_field("functions", stored=True)
-        schema_builder.add_text_field("imports", stored=True)
+        # IFS-specific fields - ensure they're indexed for fuzzy search
+        schema_builder.add_text_field("entities", stored=True, index_option="position")
+        schema_builder.add_text_field(
+            "dependencies", stored=True, index_option="position"
+        )
+        schema_builder.add_text_field("functions", stored=True, index_option="position")
+        schema_builder.add_text_field("imports", stored=True, index_option="position")
 
         # Enhanced IFS structure fields
-        schema_builder.add_text_field("module", stored=True)  # e.g., "proj", "career"
+        schema_builder.add_text_field("module", stored=True, index_option="position")
         schema_builder.add_text_field(
-            "logical_unit", stored=True
-        )  # Entity logical name from filename
+            "logical_unit", stored=True, index_option="position"
+        )
         schema_builder.add_text_field(
-            "entity_name", stored=True
-        )  # Primary entity name for exact matching
+            "entity_name", stored=True, index_option="position"
+        )
+        schema_builder.add_text_field("component", stored=True, index_option="position")
+
+        # Frontend UI elements - these need to be searchable
+        schema_builder.add_text_field("pages", stored=True, index_option="position")
+        schema_builder.add_text_field("lists", stored=True, index_option="position")
+        schema_builder.add_text_field("groups", stored=True, index_option="position")
         schema_builder.add_text_field(
-            "component", stored=True
-        )  # Component from entity definition
+            "entitysets", stored=True, index_option="position"
+        )
+        schema_builder.add_text_field("iconsets", stored=True, index_option="position")
+        schema_builder.add_text_field("trees", stored=True, index_option="position")
+        schema_builder.add_text_field(
+            "navigators", stored=True, index_option="position"
+        )
+        schema_builder.add_text_field("contexts", stored=True, index_option="position")
 
         # Metrics fields
         schema_builder.add_float_field("complexity_score", stored=True, indexed=True)
@@ -167,13 +253,6 @@ class IFSCloudTantivyIndexer:
         schema_builder.add_text_field("hash", stored=True)
 
         return schema_builder.build()
-
-    def _create_or_open_index(self, create_new: bool) -> tantivy.Index:
-        """Create or open a Tantivy index."""
-        if create_new or not (self.index_path / "meta.json").exists():
-            return tantivy.Index(self._schema, path=str(self.index_path))
-        else:
-            return tantivy.Index.open(str(self.index_path))
 
     def _load_cache_metadata(self):
         """Load cache metadata from disk."""
@@ -282,6 +361,8 @@ class IFSCloudTantivyIndexer:
             # Clear cache when creating new index
             self._file_cache = {}
             return tantivy.Index(self._schema, path=str(self.index_path))
+        else:
+            return tantivy.Index.open(str(self.index_path))
 
     def calculate_complexity_score(self, content: str, file_type: str) -> float:
         """Calculate complexity score for a file based on its content and type.
@@ -433,10 +514,22 @@ class IFSCloudTantivyIndexer:
 
             # Extract IFS-specific data using enhanced parsers
             file_type = file_path.suffix
-            entities = self.extract_entities(content, file_type)
-            dependencies = self.extract_dependencies(content, file_type)
-            functions = self.extract_functions(content, file_type)
-            imports = self.extract_imports(content, file_type)
+            parsed = self._parser.parse(content, file_type)
+
+            entities = parsed.entities
+            dependencies = parsed.dependencies
+            functions = parsed.functions
+            imports = parsed.imports
+
+            # Extract new frontend elements (for .client and .fragment files)
+            pages = parsed.pages or []
+            lists = parsed.lists or []
+            groups = parsed.groups or []
+            entitysets = parsed.entitysets or []
+            iconsets = parsed.iconsets or []
+            trees = parsed.trees or []
+            navigators = parsed.navigators or []
+            contexts = parsed.contexts or []
 
             # Extract module and logical unit information from file path
             module, logical_unit = self._extract_module_info(file_path)
@@ -451,7 +544,7 @@ class IFSCloudTantivyIndexer:
             complexity_score = self.calculate_complexity_score(content, file_type)
             content_preview = content[:500] if content else ""
 
-            # Create document
+            # Create document with enhanced frontend elements
             doc = {
                 "path": str(file_path),
                 "name": file_path.name,
@@ -468,6 +561,14 @@ class IFSCloudTantivyIndexer:
                 "logical_unit": logical_unit,
                 "entity_name": entity_name,
                 "component": component,
+                "pages": " ".join(pages),
+                "lists": " ".join(lists),
+                "groups": " ".join(groups),
+                "entitysets": " ".join(entitysets),
+                "iconsets": " ".join(iconsets),
+                "trees": " ".join(trees),
+                "navigators": " ".join(navigators),
+                "contexts": " ".join(contexts),
                 "complexity_score": complexity_score,
                 "line_count": line_count,
                 "hash": file_hash,
@@ -475,7 +576,13 @@ class IFSCloudTantivyIndexer:
 
             # Add document to index
             writer = self._get_writer()
-            writer.add_document(tantivy.Document(**doc))
+            try:
+                writer.add_document(tantivy.Document(**doc))
+                logger.debug(f"Successfully added document for {file_path}")
+            except Exception as e:
+                logger.error(f"Error adding document for {file_path}: {e}")
+                logger.error(f"Document keys: {list(doc.keys())}")
+                return False
 
             # Update cache
             self._update_file_cache(file_path, file_hash)
@@ -545,6 +652,8 @@ class IFSCloudTantivyIndexer:
         # Commit changes and save cache metadata
         try:
             if self._commit_writer():
+                # Reload index to make new documents searchable
+                self._index.reload()
                 self._save_cache_metadata()
                 logger.info(
                     f"Indexing complete: {stats['indexed']} indexed, "
@@ -584,24 +693,138 @@ class IFSCloudTantivyIndexer:
         searcher = self._index.searcher()
 
         try:
-            # Build query using the index's parse_query method
+            # Build query with proper fuzzy search using Tantivy bindings
             default_fields = [
                 "content",
                 "entities",
                 "functions",
                 "module",
                 "entity_name",
+                "pages",
+                "lists",
+                "groups",
+                "iconsets",
+                "trees",
+                "navigators",
+                "contexts",
             ]
+
+            # Start with regular search
             parsed_query = self._index.parse_query(
                 query, default_field_names=default_fields
             )
-
-            # Execute search
             search_results = searcher.search(parsed_query, limit=limit)
 
+            # ALWAYS try fuzzy search for queries >= 3 chars (not just when we have insufficient results)
+            # This ensures we get fuzzy matches even when exact matches exist
+            if len(query.strip()) >= 3:
+                try:
+                    # Create fuzzy queries for each field using FuzzyTermQuery
+                    # IMPORTANT: Use lowercase for fuzzy search to match tokenizer behavior
+                    lowercase_query = query.lower()
+                    fuzzy_queries = []
+                    for field_name in default_fields:
+                        try:
+                            fuzzy_query = tantivy.Query.fuzzy_term_query(
+                                self._schema,
+                                field_name,
+                                lowercase_query,
+                                distance=2,
+                                prefix=False,  # Max distance is 2
+                            )
+                            fuzzy_queries.append((tantivy.Occur.Should, fuzzy_query))
+                        except Exception as e:
+                            logger.debug(
+                                f"Failed to create fuzzy query for field {field_name}: {e}"
+                            )
+                            continue  # Skip fields that don't exist or can't be queried
+
+                    if fuzzy_queries:
+                        # Combine all fuzzy queries with boolean OR
+                        combined_fuzzy_query = tantivy.Query.boolean_query(
+                            fuzzy_queries
+                        )
+                        fuzzy_results = searcher.search(
+                            combined_fuzzy_query, limit=limit
+                        )
+
+                        # Combine results, avoiding duplicates but keeping both exact and fuzzy matches
+                        combined_hits = list(search_results.hits)
+                        seen_doc_addrs = [
+                            doc_addr for _, doc_addr in search_results.hits
+                        ]
+
+                        for score, doc_addr in fuzzy_results.hits:
+                            # Check if doc_addr is already in seen list
+                            if not any(
+                                existing_addr == doc_addr
+                                for existing_addr in seen_doc_addrs
+                            ):
+                                # Slightly lower score for fuzzy matches to prioritize exact matches
+                                combined_hits.append((score * 0.9, doc_addr))
+                                seen_doc_addrs.append(doc_addr)
+
+                        # Sort by score - store combined hits for later processing
+                        combined_hits.sort(key=lambda x: x[0], reverse=True)
+                        final_hits = combined_hits[:limit]
+                except Exception as e:
+                    logger.debug(f"Fuzzy search failed: {e}")
+                    pass  # Keep original results if fuzzy fails
+
+            # Also try prefix search for shorter queries or to supplement results
+            if len(query.strip()) >= 2:
+                try:
+                    # Create prefix queries for each field
+                    prefix_queries = []
+                    for field_name in default_fields:
+                        try:
+                            # Use fuzzy query with distance=0 and prefix=True for exact prefix matching
+                            prefix_query = tantivy.Query.fuzzy_term_query(
+                                self._schema, field_name, query, distance=0, prefix=True
+                            )
+                            prefix_queries.append((tantivy.Occur.Should, prefix_query))
+                        except Exception as e:
+                            logger.debug(
+                                f"Failed to create prefix query for field {field_name}: {e}"
+                            )
+                            continue  # Skip fields that don't exist or can't be queried
+
+                    if prefix_queries:
+                        # Combine all prefix queries with boolean OR
+                        combined_prefix_query = tantivy.Query.boolean_query(
+                            prefix_queries
+                        )
+                        prefix_results = searcher.search(
+                            combined_prefix_query, limit=limit
+                        )
+
+                        # Combine with existing results
+                        if "final_hits" not in locals():
+                            final_hits = list(search_results.hits)
+                        seen_doc_addrs = [doc_addr for _, doc_addr in final_hits]
+
+                        for score, doc_addr in prefix_results.hits:
+                            # Check if doc_addr is already in seen list
+                            if not any(
+                                existing_addr == doc_addr
+                                for existing_addr in seen_doc_addrs
+                            ):
+                                # Even lower score for prefix matches
+                                final_hits.append((score * 0.8, doc_addr))
+                                seen_doc_addrs.append(doc_addr)
+
+                        # Sort by score and limit results
+                        final_hits.sort(key=lambda x: x[0], reverse=True)
+                        final_hits = final_hits[:limit]
+                except Exception as e:
+                    logger.debug(f"Prefix search failed: {e}")
+                    pass  # Keep existing results if prefix fails
+
             # Convert to SearchResult objects
+            # Use final_hits if we have fuzzy/prefix results, otherwise use original search results
+            hits_to_process = locals().get("final_hits", search_results.hits)
             results = []
-            for score, doc_address in search_results.hits:
+            for score, doc_address in hits_to_process:
                 doc = searcher.doc(doc_address)
 
                 search_result = SearchResult(
@@ -626,6 +849,40 @@ class IFSCloudTantivyIndexer:
                     logical_unit=doc.get_first("logical_unit") or None,
                     entity_name=doc.get_first("entity_name") or None,
                     component=doc.get_first("component") or None,
+                    pages=(
+                        doc.get_first("pages").split() if doc.get_first("pages") else []
+                    ),
+                    lists=(
+                        doc.get_first("lists").split() if doc.get_first("lists") else []
+                    ),
+                    groups=(
+                        doc.get_first("groups").split()
+                        if doc.get_first("groups")
+                        else []
+                    ),
+                    entitysets=(
+                        doc.get_first("entitysets").split()
+                        if doc.get_first("entitysets")
+                        else []
+                    ),
+                    iconsets=(
+                        doc.get_first("iconsets").split()
+                        if doc.get_first("iconsets")
+                        else []
+                    ),
+                    trees=(
+                        doc.get_first("trees").split() if doc.get_first("trees") else []
+                    ),
+                    navigators=(
+                        doc.get_first("navigators").split()
+                        if doc.get_first("navigators")
+                        else []
+                    ),
+                    contexts=(
+                        doc.get_first("contexts").split()
+                        if doc.get_first("contexts")
+                        else []
+                    ),
                 )
 
                 # Apply post-search filters if needed
