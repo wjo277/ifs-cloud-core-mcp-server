@@ -49,6 +49,42 @@ class IFSCloudMCPServer:
         ) -> str:
             """Search IFS Cloud files by content with advanced filtering.
 
+            **AGENT INSTRUCTIONS:**
+            Primary search tool for finding IFS Cloud code, patterns, and examples.
+
+            **When to use:**
+            - Finding existing implementations of features
+            - Searching for specific APIs or methods
+            - Locating examples of business logic
+            - Discovering patterns and naming conventions
+
+            **Search strategies:**
+            - Entity search: query="CustomerOrder" (finds all CustomerOrder-related files)
+            - Function search: query="Calculate_Price" (finds pricing implementations)
+            - Pattern search: query="validation business rule" (finds validation patterns)
+            - API search: query="Get_Info" (finds info retrieval methods)
+
+            **File type filters:**
+            - .entity: Entity definitions (data models)
+            - .plsql: PL/SQL business logic and APIs
+            - .client: Frontend client definitions
+            - .projection: Business projections and views
+            - .fragment: UI fragments and components
+            - .views: Database views
+            - .storage: Storage configurations
+
+            **Complexity filtering:**
+            - min_complexity=0.0: Include simple files
+            - max_complexity=0.5: Exclude very complex files
+            - Use for finding simple examples or complex implementations
+
+            **Examples:**
+            - Find order logic: search_content("CustomerOrder pricing", file_type=".plsql")
+            - Simple entities: search_content("Product", file_type=".entity", max_complexity=0.3)
+            - Validation patterns: search_content("Check_Insert___", limit=20)
+
+            **Output:** Ranked search results with content previews and file information
+
             Args:
                 query: Search query (supports full-text search)
                 limit: Maximum number of results (default: 10)
@@ -56,7 +92,7 @@ class IFSCloudMCPServer:
                 min_complexity: Minimum complexity score (0.0-1.0)
                 max_complexity: Maximum complexity score (0.0-1.0)
             """
-            results = self.indexer.search(
+            results = self.indexer.search_deduplicated(
                 query=query,
                 limit=limit,
                 file_type=file_type,
@@ -81,7 +117,7 @@ class IFSCloudMCPServer:
             """
             # Search in entities field specifically
             query = f"entities:{entity}"
-            results = self.indexer.search(query=query, limit=limit)
+            results = self.indexer.search_deduplicated(query=query, limit=limit)
 
             if not results:
                 return f"No files found containing entity: '{entity}'"
@@ -112,7 +148,9 @@ class IFSCloudMCPServer:
             if logical_unit:
                 enhanced_query += f" logical_unit:{logical_unit}"
 
-            results = self.indexer.search(query=enhanced_query, limit=limit)
+            results = self.indexer.search_deduplicated(
+                query=enhanced_query, limit=limit
+            )
 
             if not results:
                 filter_desc = ""
@@ -184,7 +222,7 @@ class IFSCloudMCPServer:
             """
             # Use a broad query and filter by complexity
             query = "*"
-            results = self.indexer.search(
+            results = self.indexer.search_deduplicated(
                 query=query,
                 limit=limit * 2,  # Get more results to filter
                 file_type=file_type,
@@ -297,7 +335,7 @@ Supported File Types:
             # Add fuzzy search operators to the query
             fuzzy_query = f"{query}~"  # Tantivy fuzzy search syntax
 
-            results = self.indexer.search(query=fuzzy_query, limit=limit)
+            results = self.indexer.search_deduplicated(query=fuzzy_query, limit=limit)
 
             if not results:
                 return f"No results found for fuzzy query: '{query}'"
@@ -371,12 +409,12 @@ Supported File Types:
                 entity_name: Name of the entity to analyze
             """
             # Search for files that contain this entity
-            entity_results = self.indexer.search(
+            entity_results = self.indexer.search_deduplicated(
                 query=f"entities:{entity_name}", limit=50
             )
 
             # Search for files that depend on this entity
-            dependency_results = self.indexer.search(
+            dependency_results = self.indexer.search_deduplicated(
                 query=f"dependencies:{entity_name}", limit=50
             )
 
@@ -446,7 +484,7 @@ Supported File Types:
             if entity_name:
                 query += f" AND entities:{entity_name}"
 
-            results = self.indexer.search(query=query, limit=50)
+            results = self.indexer.search_deduplicated(query=query, limit=50)
 
             response_lines = ["Override and Overtake Analysis", "=" * 40, ""]
 
@@ -588,6 +626,2548 @@ Supported File Types:
 
             except Exception as e:
                 return f"Error getting cache statistics: {str(e)}"
+
+        # ==== IFS CLOUD DEVELOPMENT ASSISTANCE TOOLS ====
+
+        @self.mcp.tool()
+        async def generate_entity_template(
+            entity_name: str,
+            module: str,
+            logical_unit: Optional[str] = None,
+            include_states: bool = False,
+            include_associations: bool = False,
+        ) -> str:
+            """Generate a complete IFS Cloud entity template with proper XML structure.
+
+            **AGENT INSTRUCTIONS:**
+            This tool generates IFS Cloud entity XML files that match production standards.
+
+            **When to use:**
+            - Creating new business entities (Customer, Order, Product, etc.)
+            - Setting up data models for IFS Cloud modules
+            - Generating entity scaffolding for development
+
+            **Parameter guidance:**
+            - entity_name: Use PascalCase (CustomerOrder, ProductItem, WorkOrder)
+            - module: IFS module name in UPPERCASE (ORDER, INVENTORY, MANUFACT)
+            - include_states: Only set to True for entities that have lifecycle progression
+              (orders: planned→active→completed, workflows, approvals)
+            - include_associations: Set to True when entity relates to other entities
+
+            **Examples:**
+            - Simple reference data: generate_entity_template("ProductCategory", "INVENTORY")
+            - Order entity: generate_entity_template("CustomerOrder", "ORDER", include_states=True)
+            - Related entity: generate_entity_template("OrderLine", "ORDER", include_associations=True)
+
+            **Output:** Complete XML entity definition ready for IFS Cloud development
+
+            Args:
+                entity_name: Name of the entity (e.g., 'CustomerOrder')
+                module: IFS module name (e.g., 'Order', 'Inventory')
+                logical_unit: Optional logical unit name
+                include_states: Include state machine (only for entities that progress through states)
+                include_associations: Include association placeholders
+            """
+            lu_name = logical_unit or f"{entity_name}Lu"
+            component = module.upper()
+
+            template = f"""<?xml version="1.0" encoding="UTF-8"?>
+<ENTITY xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="urn:ifsworld-com:schemas:entity_entity">
+   <CODE_GENERATION_PROPERTIES>
+      <CODE_GENERATION_PROPERTIES>
+         <DB_RMCOM_ACCESS>{entity_name}({entity_name.lower()}_id)</DB_RMCOM_ACCESS>
+         <DB_DATA_SYNC>true</DB_DATA_SYNC>
+         <DB_DATA_SYNC_SITE>CONTRACT</DB_DATA_SYNC_SITE>
+         <TIMESTAMP_T_Z_REF>site(Contract)</TIMESTAMP_T_Z_REF>
+      </CODE_GENERATION_PROPERTIES>
+   </CODE_GENERATION_PROPERTIES>
+   
+   <COMMENTS>
+      <COMMENT>
+         <COMMENT_TYPE>ENTITY</COMMENT_TYPE>
+         <TEXT>{entity_name} entity for {module} module</TEXT>
+      </COMMENT>
+   </COMMENTS>
+   
+   <NAME>Main</NAME>
+   <COMPONENT>{component}</COMPONENT>
+   
+   <ATTRIBUTES>
+      <ATTRIBUTE>
+         <CODE_GENERATION_PROPERTIES>
+            <COLUMN_NAME>{entity_name.upper()}_ID</COLUMN_NAME>
+         </CODE_GENERATION_PROPERTIES>
+         <NAME>{entity_name}Id</NAME>
+         <IS_PRIMARY_KEY>1</IS_PRIMARY_KEY>
+         <IS_PARENT_KEY>0</IS_PARENT_KEY>
+         <IS_PUBLIC>0</IS_PUBLIC>
+         <IS_MANDATORY>1</IS_MANDATORY>
+         <IS_SERVER_GENERATED>0</IS_SERVER_GENERATED>
+         <IS_UPDATE_ALLOWED>0</IS_UPDATE_ALLOWED>
+         <IS_UPDATE_ALLOWED_IF_NULL>0</IS_UPDATE_ALLOWED_IF_NULL>
+         <IS_DEFAULT_LOV>1</IS_DEFAULT_LOV>
+         <IS_QUERYABLE>1</IS_QUERYABLE>
+         <IS_DERIVED>0</IS_DERIVED>
+         <DATATYPE>TEXT</DATATYPE>
+         <LENGTH>50</LENGTH>
+         <FORMAT>UPPERCASE</FORMAT>
+         <PROMPT>{entity_name} ID</PROMPT>
+      </ATTRIBUTE>
+      
+      <ATTRIBUTE>
+         <NAME>Description</NAME>
+         <IS_PRIMARY_KEY>0</IS_PRIMARY_KEY>
+         <IS_PARENT_KEY>0</IS_PARENT_KEY>
+         <IS_PUBLIC>1</IS_PUBLIC>
+         <IS_MANDATORY>0</IS_MANDATORY>
+         <IS_SERVER_GENERATED>0</IS_SERVER_GENERATED>
+         <IS_UPDATE_ALLOWED>1</IS_UPDATE_ALLOWED>
+         <IS_UPDATE_ALLOWED_IF_NULL>0</IS_UPDATE_ALLOWED_IF_NULL>
+         <IS_DEFAULT_LOV>1</IS_DEFAULT_LOV>
+         <IS_QUERYABLE>1</IS_QUERYABLE>
+         <IS_DERIVED>0</IS_DERIVED>
+         <DATATYPE>TEXT</DATATYPE>
+         <LENGTH>200</LENGTH>
+         <PROMPT>Description</PROMPT>
+      </ATTRIBUTE>
+      
+      <ATTRIBUTE>
+         <NAME>State</NAME>
+         <IS_PRIMARY_KEY>0</IS_PRIMARY_KEY>
+         <IS_PARENT_KEY>0</IS_PARENT_KEY>
+         <IS_PUBLIC>1</IS_PUBLIC>
+         <IS_MANDATORY>1</IS_MANDATORY>
+         <IS_SERVER_GENERATED>0</IS_SERVER_GENERATED>
+         <IS_UPDATE_ALLOWED>1</IS_UPDATE_ALLOWED>
+         <IS_UPDATE_ALLOWED_IF_NULL>0</IS_UPDATE_ALLOWED_IF_NULL>
+         <IS_DEFAULT_LOV>0</IS_DEFAULT_LOV>
+         <IS_QUERYABLE>1</IS_QUERYABLE>
+         <IS_DERIVED>0</IS_DERIVED>
+         <DATATYPE>ENUMERATION</DATATYPE>
+         <PROMPT>State</PROMPT>
+      </ATTRIBUTE>
+      
+      <ATTRIBUTE>
+         <NAME>CreatedDate</NAME>
+         <IS_PRIMARY_KEY>0</IS_PRIMARY_KEY>
+         <IS_PARENT_KEY>0</IS_PARENT_KEY>
+         <IS_PUBLIC>1</IS_PUBLIC>
+         <IS_MANDATORY>1</IS_MANDATORY>
+         <IS_SERVER_GENERATED>1</IS_SERVER_GENERATED>
+         <IS_UPDATE_ALLOWED>0</IS_UPDATE_ALLOWED>
+         <IS_UPDATE_ALLOWED_IF_NULL>0</IS_UPDATE_ALLOWED_IF_NULL>
+         <IS_DEFAULT_LOV>0</IS_DEFAULT_LOV>
+         <IS_QUERYABLE>1</IS_QUERYABLE>
+         <IS_DERIVED>0</IS_DERIVED>
+         <DATATYPE>TIMESTAMP</DATATYPE>
+         <PROMPT>Created Date</PROMPT>
+      </ATTRIBUTE>
+      
+      <ATTRIBUTE>
+         <NAME>CreatedBy</NAME>
+         <IS_PRIMARY_KEY>0</IS_PRIMARY_KEY>
+         <IS_PARENT_KEY>0</IS_PARENT_KEY>
+         <IS_PUBLIC>1</IS_PUBLIC>
+         <IS_MANDATORY>1</IS_MANDATORY>
+         <IS_SERVER_GENERATED>1</IS_SERVER_GENERATED>
+         <IS_UPDATE_ALLOWED>0</IS_UPDATE_ALLOWED>
+         <IS_UPDATE_ALLOWED_IF_NULL>0</IS_UPDATE_ALLOWED_IF_NULL>
+         <IS_DEFAULT_LOV>0</IS_DEFAULT_LOV>
+         <IS_QUERYABLE>1</IS_QUERYABLE>
+         <IS_DERIVED>0</IS_DERIVED>
+         <DATATYPE>TEXT</DATATYPE>
+         <LENGTH>30</LENGTH>
+         <PROMPT>Created By</PROMPT>
+      </ATTRIBUTE>
+      
+      <ATTRIBUTE>
+         <NAME>Rowversion</NAME>
+         <IS_PRIMARY_KEY>0</IS_PRIMARY_KEY>
+         <IS_PARENT_KEY>0</IS_PARENT_KEY>
+         <IS_PUBLIC>1</IS_PUBLIC>
+         <IS_MANDATORY>1</IS_MANDATORY>
+         <IS_SERVER_GENERATED>1</IS_SERVER_GENERATED>
+         <IS_UPDATE_ALLOWED>0</IS_UPDATE_ALLOWED>
+         <IS_UPDATE_ALLOWED_IF_NULL>0</IS_UPDATE_ALLOWED_IF_NULL>
+         <IS_DEFAULT_LOV>0</IS_DEFAULT_LOV>
+         <IS_QUERYABLE>0</IS_QUERYABLE>
+         <IS_DERIVED>0</IS_DERIVED>
+         <DATATYPE>TIMESTAMP</DATATYPE>
+         <PROMPT>Row Version</PROMPT>
+      </ATTRIBUTE>
+   </ATTRIBUTES>"""
+
+            # Only add states if explicitly requested (for entities that need state progression)
+            if include_states:
+                template += f"""
+   
+   <STATES>
+      <STATE>
+         <NAME>{{start}}</NAME>
+         <DESCRIPTION>Initial state</DESCRIPTION>
+      </STATE>
+      <STATE>
+         <NAME>Planned</NAME>
+         <DESCRIPTION>Planned state</DESCRIPTION>
+      </STATE>
+      <STATE>
+         <NAME>Active</NAME>
+         <DESCRIPTION>Active state</DESCRIPTION>
+      </STATE>
+      <STATE>
+         <NAME>Completed</NAME>
+         <DESCRIPTION>Completed state</DESCRIPTION>
+      </STATE>
+      <STATE>
+         <NAME>Cancelled</NAME>
+         <DESCRIPTION>Cancelled state</DESCRIPTION>
+      </STATE>
+   </STATES>"""
+
+            # Only add associations if requested
+            if include_associations:
+                template += f"""
+   
+   <ASSOCIATIONS>
+      <!-- Add associations here as needed -->
+      <!-- Example:
+      <ASSOCIATION>
+         <NAME>ParentRef</NAME>
+         <IS_PARENT>1</IS_PARENT>
+         <IS_VIEW_REFERENCE>0</IS_VIEW_REFERENCE>
+         <TO_ENTITY>ParentEntity</TO_ENTITY>
+         <ATTRIBUTES>
+            <ATTRIBUTE>
+               <FROM_ATTRIBUTE>ParentId</FROM_ATTRIBUTE>
+               <TO_ATTRIBUTE>Id</TO_ATTRIBUTE>
+            </ATTRIBUTE>
+         </ATTRIBUTES>
+      </ASSOCIATION>
+      -->
+   </ASSOCIATIONS>"""
+
+            template += f"""
+   
+   <OBJECT_CONNECTIONS>
+      <!-- Object connections will be auto-generated -->
+   </OBJECT_CONNECTIONS>
+</ENTITY>"""
+
+            state_note = (
+                " (with state machine)" if include_states else " (simple entity)"
+            )
+            assoc_note = " and associations" if include_associations else ""
+
+            return f"Generated IFS Cloud Entity Template{state_note}:{assoc_note}\\n\\n```xml\\n{template}\\n```\\n\\n**Note**: This template creates a {'stateful' if include_states else 'simple'} entity without unnecessary diagrams. States are only included when the entity needs to progress through different lifecycle phases."
+
+        @self.mcp.tool()
+        async def generate_plsql_package_template(
+            package_name: str,
+            entity_name: str,
+            include_crud: bool = True,
+            include_business_logic: bool = True,
+        ) -> str:
+            """Generate PL/SQL package template for IFS Cloud entity.
+
+            **AGENT INSTRUCTIONS:**
+            This tool creates PL/SQL packages following IFS Cloud standards and patterns.
+
+            **When to use:**
+            - Creating API packages for entities
+            - Building business logic packages
+            - Setting up logical unit implementations
+            - Creating utility packages
+
+            **Package naming conventions:**
+            - Entity APIs: EntityName_API (Customer_Order_API, Product_API)
+            - Logical Units: LogicalUnitName (Customer_Order_Handling, Product_Mgmt)
+            - Utilities: ModuleName_Util_API (Order_Util_API, Inventory_Util_API)
+
+            **Parameter guidance:**
+            - package_name: Follow IFS naming with underscores (Customer_Order_API)
+            - entity_name: Related entity name (CustomerOrder, Product)
+            - include_crud: True for entity APIs (creates New__, Modify__, Remove__ procedures)
+            - include_business_logic: True for packages with business rules and validations
+
+            **Examples:**
+            - Entity API: generate_plsql_package_template("Customer_Order_API", "CustomerOrder")
+            - Business logic: generate_plsql_package_template("Pricing_Engine", "CustomerOrder", include_crud=False)
+            - Utility: generate_plsql_package_template("Order_Util_API", "OrderUtil", include_business_logic=False)
+
+            **Output:** Complete PL/SQL package specification and body with IFS Cloud patterns
+
+            Args:
+                package_name: Package name (e.g., 'Customer_Order_API')
+                entity_name: Related entity name
+                include_crud: Include CRUD procedures
+                include_business_logic: Include business logic templates
+            """
+
+            spec_template = f"""-- Generated PL/SQL Package Specification for {package_name}
+-- =============================================================================
+-- AGENT INSTRUCTIONS:
+-- 1. CONSTANTS SECTION: Add module and logical unit constants below
+-- 2. TYPES SECTION: Define record types and table types below  
+-- 3. PUBLIC METHODS: Add procedure/function declarations below
+-- 4. Follow IFS naming conventions (Pascal_Case for procedures/functions)
+-- =============================================================================
+
+CREATE OR REPLACE PACKAGE {package_name} IS
+
+   -- =============================================================================
+   -- CONSTANTS SECTION - AGENTS ADD MODULE/LU CONSTANTS HERE
+   -- =============================================================================
+   module_    CONSTANT VARCHAR2(25) := 'ORDER';  -- AGENT: Update module name
+   lu_name_   CONSTANT VARCHAR2(25) := '{entity_name.upper()}';  -- AGENT: Logical unit name
+
+   -- =============================================================================
+   -- TYPES SECTION - AGENTS ADD RECORD TYPES AND TABLE TYPES HERE
+   -- =============================================================================
+   TYPE Public_Rec IS RECORD (
+      -- AGENT: Add record fields based on table structure
+      id             {entity_name.lower()}_tab.id%TYPE,
+      description    {entity_name.lower()}_tab.description%TYPE,
+      state          {entity_name.lower()}_tab.state%TYPE,
+      created_date   {entity_name.lower()}_tab.created_date%TYPE,
+      created_by     {entity_name.lower()}_tab.created_by%TYPE
+      -- AGENT: Add more fields as needed
+   );
+
+   TYPE Public_Rec_Array IS TABLE OF Public_Rec INDEX BY PLS_INTEGER;
+   -- AGENT: Add more collection types here if needed
+
+   -- =============================================================================
+   -- PUBLIC METHODS SECTION - AGENTS ADD METHOD DECLARATIONS HERE
+   -- =============================================================================
+"""
+
+            if include_crud:
+                spec_template += f"""
+   -- =============================================================================
+   -- CRUD OPERATIONS SECTION - AGENTS ADD CRUD METHOD DECLARATIONS HERE
+   -- =============================================================================
+   
+   -- AGENT: Get method - retrieves single record
+   FUNCTION Get (
+      id_ IN VARCHAR2 ) RETURN Public_Rec;
+      
+   -- AGENT: New method - creates new record (follows IFS pattern)
+   PROCEDURE New (
+      info_ OUT VARCHAR2,        -- AGENT: Standard IFS info parameter for messages
+      objid_ OUT VARCHAR2,       -- AGENT: Object ID output parameter
+      objversion_ OUT VARCHAR2,  -- AGENT: Object version for optimistic locking
+      attr_ IN OUT VARCHAR2,     -- AGENT: Attribute string with field values
+      action_ IN VARCHAR2 DEFAULT 'DO' );  -- AGENT: Action (CHECK/DO/PREPARE)
+      
+   -- AGENT: Modify method - updates existing record (follows IFS pattern)  
+   PROCEDURE Modify (
+      info_ OUT VARCHAR2,        -- AGENT: Standard IFS info parameter for messages
+      objid_ IN VARCHAR2,        -- AGENT: Object ID input parameter
+      objversion_ IN OUT VARCHAR2, -- AGENT: Object version for optimistic locking
+      attr_ IN OUT VARCHAR2,     -- AGENT: Attribute string with field values
+      action_ IN VARCHAR2 DEFAULT 'DO' );  -- AGENT: Action (CHECK/DO/PREPARE)
+      
+   -- AGENT: Remove method - deletes record (follows IFS pattern)
+   PROCEDURE Remove (
+      info_ OUT VARCHAR2,        -- AGENT: Standard IFS info parameter for messages
+      objid_ IN VARCHAR2,        -- AGENT: Object ID input parameter
+      objversion_ IN VARCHAR2,   -- AGENT: Object version for optimistic locking
+      action_ IN VARCHAR2 DEFAULT 'DO' );  -- AGENT: Action (CHECK/DO/PREPARE)
+"""
+
+            if include_business_logic:
+                spec_template += f"""
+   -- =============================================================================
+   -- BUSINESS LOGIC SECTION - AGENTS ADD BUSINESS METHOD DECLARATIONS HERE
+   -- =============================================================================
+   
+   -- AGENT: Validation methods - add data validation procedures
+   PROCEDURE Validate_Id (
+      id_ IN VARCHAR2 );         -- AGENT: Validates ID field format/existence
+      
+   -- AGENT: State management - add state transition validations
+   PROCEDURE Check_State_Transition (
+      id_ IN VARCHAR2,           -- AGENT: Record identifier
+      new_state_ IN VARCHAR2 );  -- AGENT: Target state to validate
+      
+   -- AGENT: Calculation methods - add business calculation functions
+   FUNCTION Calculate_Total (
+      id_ IN VARCHAR2 ) RETURN NUMBER;  -- AGENT: Returns calculated business values
+      
+   -- AGENT: Business rule enforcement - add rule processing procedures
+   PROCEDURE Process_Business_Rule (
+      id_ IN VARCHAR2,           -- AGENT: Record identifier  
+      action_ IN VARCHAR2 );     -- AGENT: Business action to process
+      
+   -- AGENT: Add more business logic methods here as needed
+"""
+
+            spec_template += f"""
+   -- =============================================================================
+   -- END OF PACKAGE SPECIFICATION
+   -- =============================================================================
+
+END {package_name};
+/
+"""
+
+            body_template = f"""-- Generated PL/SQL Package Body for {package_name}
+-- =============================================================================
+-- AGENT INSTRUCTIONS:
+-- 1. PRIVATE METHODS: Add internal/helper procedures below private section
+-- 2. PUBLIC METHOD IMPLEMENTATIONS: Implement all public methods from spec
+-- 3. VARIABLE DECLARATIONS: Add local variables in method bodies
+-- 4. ERROR HANDLING: Use Error_SYS.Record_General for IFS standard errors
+-- 5. LOGGING: Use Trace_SYS for debugging when needed
+-- =============================================================================
+
+CREATE OR REPLACE PACKAGE BODY {package_name} IS
+
+   -- =============================================================================
+   -- PRIVATE METHODS SECTION - AGENTS ADD HELPER PROCEDURES HERE
+   -- =============================================================================
+   
+   -- AGENT: Add private helper methods here (suffix with ___)
+   PROCEDURE Check_Exist___ (
+      id_ IN VARCHAR2 ) IS
+   BEGIN
+      -- AGENT: Implement existence check logic
+      -- AGENT: Raise error if record doesn't exist
+      -- Example: Error_SYS.Record_Not_Exist(lu_name_);
+      NULL;
+   END Check_Exist___;
+
+   -- AGENT: Add more private methods here as needed
+   -- Examples: Validate_Fields___, Calculate_Derived___, etc.
+
+   -- =============================================================================
+   -- PUBLIC METHOD IMPLEMENTATIONS - AGENTS IMPLEMENT SPEC METHODS HERE
+   -- =============================================================================
+
+   -- AGENT: Implement Get function - return populated record
+   FUNCTION Get (
+      id_ IN VARCHAR2 ) RETURN Public_Rec IS
+      
+      rec_ Public_Rec;  -- AGENT: Declare return record variable
+   BEGIN
+      -- AGENT: Add cursor or direct SELECT to populate rec_
+      -- AGENT: Handle NO_DATA_FOUND exception
+      -- Example implementation needed here
+      RETURN rec_;
+   END Get;
+
+   -- =============================================================================
+   -- BUSINESS LOGIC IMPLEMENTATIONS - AGENTS ADD BUSINESS RULES HERE  
+   -- =============================================================================
+
+   -- AGENT: Implement validation logic
+   PROCEDURE Validate_Id (
+      id_ IN VARCHAR2 ) IS
+   BEGIN
+      -- AGENT: Add validation logic here
+      -- AGENT: Check ID format, length, existence
+      -- AGENT: Use Error_SYS.Record_General for validation failures
+      -- Example: IF id_ IS NULL THEN Error_SYS.Record_General(...);
+      NULL;
+   END Validate_Id;
+
+   -- AGENT: Add more business logic implementations here
+   -- AGENT: Follow IFS patterns for error handling and logging
+
+   -- =============================================================================
+   -- INITIALIZATION SECTION - AGENTS ADD PACKAGE INITIALIZATION HERE
+   -- =============================================================================
+
+BEGIN
+   -- AGENT: Add package initialization code here if needed
+   -- AGENT: This section runs when package is first loaded
+   NULL;
+
+END {package_name};
+/
+"""
+
+            return f"Generated PL/SQL Package Templates:\\n\\n**Specification:**\\n```sql\\n{spec_template}```\\n\\n**Body:**\\n```sql\\n{body_template}```"
+
+        @self.mcp.tool()
+        async def analyze_ifs_frontend_elements(
+            query: Optional[str] = None,
+            element_type: Optional[str] = None,
+            limit: int = 20,
+        ) -> str:
+            """Analyze IFS Cloud frontend elements (pages, lists, groups, etc.).
+
+            **AGENT INSTRUCTIONS:**
+            This tool analyzes IFS Cloud frontend components from real production code.
+
+            **When to use:**
+            - Understanding existing UI patterns in IFS Cloud
+            - Finding examples of specific frontend elements
+            - Analyzing how IFS implements common UI components
+            - Learning naming conventions for frontend elements
+
+            **Element types available:**
+            - pages: Main application pages and forms
+            - lists: Data grids and list views
+            - groups: UI grouping and layout containers
+            - iconsets: Icon definitions and usage
+            - trees: Hierarchical tree views
+            - navigators: Navigation menu structures
+
+            **Search strategies:**
+            - Specific element: query="CustomerOrder" (finds all CustomerOrder-related UI)
+            - By type: element_type="pages" (shows all page definitions)
+            - Pattern search: query="search" (finds search-related components)
+            - Workflow UI: query="approval workflow" (finds approval UI patterns)
+
+            **Examples:**
+            - Find order pages: analyze_ifs_frontend_elements("CustomerOrder", "pages")
+            - Study list patterns: analyze_ifs_frontend_elements(element_type="lists", limit=10)
+            - Search patterns: analyze_ifs_frontend_elements("search filter")
+
+            **Output:** Analysis of frontend elements with patterns, naming, and usage examples
+
+            Args:
+                query: Optional search query for elements
+                element_type: Filter by element type (pages, lists, groups, iconsets, trees, navigators)
+                limit: Maximum results to return
+            """
+
+            # Build search query
+            search_query = "*"
+            if query:
+                search_query = query
+
+            results = self.indexer.search_deduplicated(
+                query=search_query, limit=limit * 2
+            )
+
+            element_counts = {
+                "pages": 0,
+                "lists": 0,
+                "groups": 0,
+                "iconsets": 0,
+                "trees": 0,
+                "navigators": 0,
+                "contexts": 0,
+            }
+
+            element_details = {
+                "pages": [],
+                "lists": [],
+                "groups": [],
+                "iconsets": [],
+                "trees": [],
+                "navigators": [],
+                "contexts": [],
+            }
+
+            for result in results:
+                # Count and collect elements from each result
+                for element_name in [
+                    "pages",
+                    "lists",
+                    "groups",
+                    "iconsets",
+                    "trees",
+                    "navigators",
+                    "contexts",
+                ]:
+                    elements = getattr(result, element_name, [])
+                    if elements:
+                        element_counts[element_name] += len(elements)
+                        for element in elements:
+                            if not element_type or element_type == element_name:
+                                element_details[element_name].append(
+                                    {
+                                        "name": element,
+                                        "file": result.name,
+                                        "path": result.path,
+                                        "module": result.module,
+                                    }
+                                )
+
+            response_lines = ["IFS Cloud Frontend Elements Analysis", "=" * 40, ""]
+
+            # Summary
+            response_lines.extend(
+                [
+                    "Summary:",
+                    f"  Pages: {element_counts['pages']}",
+                    f"  Lists: {element_counts['lists']}",
+                    f"  Groups: {element_counts['groups']}",
+                    f"  Icon Sets: {element_counts['iconsets']}",
+                    f"  Trees: {element_counts['trees']}",
+                    f"  Navigators: {element_counts['navigators']}",
+                    f"  Contexts: {element_counts['contexts']}",
+                    "",
+                ]
+            )
+
+            # Detailed listings
+            for element_name, elements in element_details.items():
+                if elements and (not element_type or element_type == element_name):
+                    response_lines.extend(
+                        [f"{element_name.title()}:", "-" * (len(element_name) + 1)]
+                    )
+
+                    for element in elements[:limit]:
+                        response_lines.append(
+                            f"  • {element['name']} ({element['file']})"
+                        )
+                        if element["module"]:
+                            response_lines.append(f"    Module: {element['module']}")
+
+                    if len(elements) > limit:
+                        response_lines.append(
+                            f"    ... and {len(elements) - limit} more"
+                        )
+                    response_lines.append("")
+
+            return "\\n".join(response_lines)
+
+        @self.mcp.tool()
+        async def suggest_ifs_patterns(
+            business_requirement: str,
+            target_module: Optional[str] = None,
+        ) -> str:
+            """Suggest IFS Cloud implementation patterns for business requirements.
+
+            Args:
+                business_requirement: Description of the business requirement
+                target_module: Target IFS module for implementation
+            """
+
+            patterns = {
+                "order": {
+                    "entities": ["Order", "OrderLine", "OrderStatus"],
+                    "apis": ["Order_API", "Order_Line_API"],
+                    "views": ["OrderView", "OrderLineView"],
+                    "states": ["Planned", "Released", "Completed", "Cancelled"],
+                },
+                "inventory": {
+                    "entities": ["InventoryPart", "InventoryTransaction", "Location"],
+                    "apis": ["Inventory_Part_API", "Inventory_Transaction_API"],
+                    "views": ["InventoryPartView", "LocationView"],
+                    "states": ["Active", "Inactive", "Obsolete"],
+                },
+                "customer": {
+                    "entities": ["Customer", "CustomerContact", "CustomerAddress"],
+                    "apis": ["Customer_API", "Customer_Contact_API"],
+                    "views": ["CustomerView", "ContactView"],
+                    "states": ["Active", "Inactive", "Prospect"],
+                },
+                "financial": {
+                    "entities": ["Account", "Transaction", "Period"],
+                    "apis": ["Account_API", "Financial_Transaction_API"],
+                    "views": ["AccountView", "TransactionView"],
+                    "states": ["Open", "Closed", "Blocked"],
+                },
+            }
+
+            # Analyze requirement to suggest patterns
+            req_lower = business_requirement.lower()
+            suggested_patterns = []
+
+            for domain, pattern in patterns.items():
+                if any(
+                    keyword in req_lower
+                    for keyword in [domain, *pattern["entities"][0].lower().split()]
+                ):
+                    suggested_patterns.append((domain, pattern))
+
+            if not suggested_patterns:
+                # Default comprehensive pattern
+                suggested_patterns = [
+                    (
+                        "generic",
+                        {
+                            "entities": ["MainEntity", "DetailEntity", "StatusEntity"],
+                            "apis": ["Main_Entity_API", "Detail_Entity_API"],
+                            "views": ["MainEntityView", "DetailEntityView"],
+                            "states": ["Draft", "Active", "Inactive"],
+                        },
+                    )
+                ]
+
+            response_lines = [
+                f"IFS Cloud Implementation Patterns for: {business_requirement}",
+                "=" * 60,
+                "",
+            ]
+
+            if target_module:
+                response_lines.extend([f"Target Module: {target_module}", ""])
+
+            for domain, pattern in suggested_patterns:
+                response_lines.extend(
+                    [
+                        f"Suggested Pattern: {domain.title()}",
+                        "-" * 30,
+                        "",
+                        "Recommended Entities:",
+                    ]
+                )
+
+                for entity in pattern["entities"]:
+                    response_lines.append(f"  • {entity}.entity")
+
+                response_lines.extend(
+                    [
+                        "",
+                        "Required APIs:",
+                    ]
+                )
+
+                for api in pattern["apis"]:
+                    response_lines.append(f"  • {api}.plsql")
+
+                response_lines.extend(
+                    [
+                        "",
+                        "Frontend Views:",
+                    ]
+                )
+
+                for view in pattern["views"]:
+                    response_lines.append(f"  • {view}.views")
+
+                response_lines.extend(
+                    [
+                        "",
+                        "Suggested States:",
+                    ]
+                )
+
+                for state in pattern["states"]:
+                    response_lines.append(f"  • {state}")
+
+                response_lines.append("")
+
+            # Add implementation guidance
+            response_lines.extend(
+                [
+                    "Implementation Steps:",
+                    "1. Create entity definitions with proper attributes",
+                    "2. Implement PL/SQL APIs with business logic",
+                    "3. Create database views for data access",
+                    "4. Define state machine if applicable",
+                    "5. Add validation and business rules",
+                    "6. Create frontend projections and pages",
+                    "7. Implement integration points",
+                    "",
+                ]
+            )
+
+            return "\\n".join(response_lines)
+
+        @self.mcp.tool()
+        async def validate_ifs_coding_standards(
+            file_path: Optional[str] = None,
+            content: Optional[str] = None,
+            file_type: Optional[str] = None,
+        ) -> str:
+            """Validate IFS Cloud coding standards and best practices.
+
+            Args:
+                file_path: Path to file to validate (will read from index)
+                content: Direct content to validate
+                file_type: File type (.entity, .plsql, .views, etc.)
+            """
+
+            if file_path:
+                # Search for the file in index
+                results = self.indexer.search_deduplicated(
+                    query=f"path:{file_path}", limit=1
+                )
+                if not results:
+                    return f"File not found in index: {file_path}"
+
+                file_result = results[0]
+                content = file_result.content if hasattr(file_result, "content") else ""
+                file_type = file_result.type
+
+            if not content:
+                return "No content provided for validation"
+
+            violations = []
+            suggestions = []
+
+            # Entity file standards
+            if file_type == ".entity":
+                if "crud = " not in content:
+                    violations.append("Missing CRUD definition")
+                    suggestions.append("Add: crud = Create, Read, Update, Delete;")
+
+                if "ludependencies = " not in content:
+                    violations.append("Missing ludependencies definition")
+                    suggestions.append(
+                        "Add: ludependencies = None; (or specify dependencies)"
+                    )
+
+                if (
+                    "required = [true]" in content
+                    and "insertable = [true]" not in content
+                ):
+                    suggestions.append(
+                        "Consider adding insertable/updatable flags for required fields"
+                    )
+
+                # Check for standard attributes
+                if "created_date" not in content.lower():
+                    suggestions.append(
+                        "Consider adding CreatedDate attribute for audit trail"
+                    )
+
+                if "created_by" not in content.lower():
+                    suggestions.append(
+                        "Consider adding CreatedBy attribute for audit trail"
+                    )
+
+            # PL/SQL standards
+            elif file_type == ".plsql":
+                if (
+                    "PACKAGE" in content.upper()
+                    and "PACKAGE BODY" not in content.upper()
+                ):
+                    if "PROCEDURE" in content.upper() or "FUNCTION" in content.upper():
+                        violations.append(
+                            "Package specification should not contain implementation"
+                        )
+
+                if "module_" not in content and "CONSTANT" in content:
+                    suggestions.append("Consider adding module_ constant")
+
+                if "lu_name_" not in content and "CONSTANT" in content:
+                    suggestions.append("Consider adding lu_name_ constant")
+
+                # Check error handling
+                if (
+                    "EXCEPTION" not in content.upper()
+                    and "RAISE" not in content.upper()
+                ):
+                    suggestions.append("Consider adding proper exception handling")
+
+            # Views standards
+            elif file_type == ".views":
+                if "entityset" in content.lower() and "from" not in content.lower():
+                    violations.append("EntitySet should specify data source")
+
+                if "page" in content.lower() and "entityset" not in content.lower():
+                    suggestions.append("Consider using EntitySet for data binding")
+
+            # General standards
+            lines = content.split("\\n")
+            for i, line in enumerate(lines, 1):
+                if len(line) > 120:
+                    violations.append(f"Line {i}: Exceeds 120 character limit")
+
+                if line.strip().endswith(";") and file_type in [".entity", ".views"]:
+                    # Check for proper semicolon usage
+                    pass
+
+            response_lines = [f"IFS Cloud Coding Standards Validation", "=" * 40, ""]
+
+            if file_path:
+                response_lines.append(f"File: {file_path}")
+            response_lines.extend([f"File Type: {file_type}", ""])
+
+            if violations:
+                response_lines.extend(["❌ Violations Found:", "-" * 20])
+                for violation in violations:
+                    response_lines.append(f"  • {violation}")
+                response_lines.append("")
+
+            if suggestions:
+                response_lines.extend(["💡 Suggestions:", "-" * 15])
+                for suggestion in suggestions:
+                    response_lines.append(f"  • {suggestion}")
+                response_lines.append("")
+
+            if not violations and not suggestions:
+                response_lines.append(
+                    "✅ No issues found - code follows IFS standards!"
+                )
+
+            return "\\n".join(response_lines)
+
+        @self.mcp.tool()
+        async def find_integration_patterns(
+            integration_type: str,
+            source_entity: Optional[str] = None,
+            target_system: Optional[str] = None,
+            limit: int = 10,
+        ) -> str:
+            """Find IFS Cloud integration patterns and examples.
+
+            **AGENT INSTRUCTIONS:**
+            This tool discovers integration patterns between IFS Cloud and external systems.
+
+            **When to use:**
+            - Planning integrations with external systems
+            - Understanding IFS Cloud integration capabilities
+            - Finding examples of specific integration types
+            - Learning how entities connect across modules
+
+            **Integration types:**
+            - "api": REST/SOAP API integrations
+            - "event": Event-driven integrations
+            - "batch": Scheduled batch processing
+            - "realtime": Real-time data synchronization
+
+            **Use cases:**
+            - ERP integrations (SAP, Oracle, etc.)
+            - CRM system connections
+            - E-commerce platform links
+            - Manufacturing system interfaces
+            - Financial system integrations
+
+            **Search strategies:**
+            - By type: find_integration_patterns("api") - shows all API patterns
+            - Entity-specific: find_integration_patterns("api", "CustomerOrder") - order API integrations
+            - System-specific: find_integration_patterns("batch", target_system="SAP") - SAP batch patterns
+
+            **Examples:**
+            - API patterns: find_integration_patterns("api", "Customer")
+            - Event handling: find_integration_patterns("event", "Order")
+            - Batch processing: find_integration_patterns("batch", limit=15)
+
+            **Output:** Integration patterns with code examples, endpoints, and implementation details
+
+            Args:
+                integration_type: Type of integration (api, event, batch, realtime)
+                source_entity: Source entity for integration
+                target_system: Target system name
+                limit: Maximum examples to return
+            """
+
+            # Search for integration-related files
+            search_terms = ["integration", "api", "event", "batch", "interface"]
+            if source_entity:
+                search_terms.append(source_entity.lower())
+            if target_system:
+                search_terms.append(target_system.lower())
+
+            query = " OR ".join(search_terms)
+            results = self.indexer.search_deduplicated(query=query, limit=limit * 2)
+
+            # Categorize integration patterns
+            patterns = {
+                "api": {
+                    "description": "REST/SOAP API integrations",
+                    "files": [],
+                    "patterns": ["HTTP calls", "JSON/XML processing", "Authentication"],
+                },
+                "event": {
+                    "description": "Event-driven integrations",
+                    "files": [],
+                    "patterns": [
+                        "Event publishing",
+                        "Event subscription",
+                        "Message queues",
+                    ],
+                },
+                "batch": {
+                    "description": "Batch processing integrations",
+                    "files": [],
+                    "patterns": [
+                        "File processing",
+                        "Scheduled jobs",
+                        "Data transformation",
+                    ],
+                },
+                "realtime": {
+                    "description": "Real-time data synchronization",
+                    "files": [],
+                    "patterns": ["Triggers", "Change data capture", "Streaming"],
+                },
+            }
+
+            # Analyze results for patterns
+            for result in results:
+                content = getattr(result, "content", "").lower()
+
+                if any(term in content for term in ["http", "rest", "soap", "api"]):
+                    patterns["api"]["files"].append(result)
+
+                if any(
+                    term in content
+                    for term in ["event", "publish", "subscribe", "message"]
+                ):
+                    patterns["event"]["files"].append(result)
+
+                if any(
+                    term in content for term in ["batch", "job", "schedule", "file"]
+                ):
+                    patterns["batch"]["files"].append(result)
+
+                if any(
+                    term in content
+                    for term in ["trigger", "realtime", "sync", "stream"]
+                ):
+                    patterns["realtime"]["files"].append(result)
+
+            response_lines = [
+                f"IFS Cloud Integration Patterns: {integration_type.title()}",
+                "=" * 50,
+                "",
+            ]
+
+            if source_entity:
+                response_lines.append(f"Source Entity: {source_entity}")
+            if target_system:
+                response_lines.append(f"Target System: {target_system}")
+            response_lines.append("")
+
+            # Show specific pattern or all patterns
+            patterns_to_show = (
+                [integration_type] if integration_type in patterns else patterns.keys()
+            )
+
+            for pattern_type in patterns_to_show:
+                pattern = patterns[pattern_type]
+                response_lines.extend(
+                    [
+                        f"{pattern_type.upper()} Integration Pattern",
+                        "-" * 30,
+                        f"Description: {pattern['description']}",
+                        "",
+                        "Common Patterns:",
+                    ]
+                )
+
+                for p in pattern["patterns"]:
+                    response_lines.append(f"  • {p}")
+
+                if pattern["files"]:
+                    response_lines.extend(
+                        [
+                            "",
+                            "Example Files:",
+                        ]
+                    )
+
+                    for file_result in pattern["files"][:limit]:
+                        response_lines.append(
+                            f"  • {file_result.name} ({file_result.type})"
+                        )
+                        if file_result.module:
+                            response_lines.append(f"    Module: {file_result.module}")
+                        response_lines.append(f"    Path: {file_result.path}")
+                        response_lines.append("")
+
+                response_lines.append("")
+
+            return "\\n".join(response_lines)
+
+        @self.mcp.tool()
+        async def generate_business_logic_template(
+            entity_name: str,
+            business_rule: str,
+            rule_type: str = "validation",
+        ) -> str:
+            """Generate business logic template for IFS Cloud entities.
+
+            Args:
+                entity_name: Target entity name
+                business_rule: Description of the business rule to implement
+                rule_type: Type of rule (validation, calculation, workflow, trigger)
+            """
+
+            templates = {
+                "validation": f"""-- =============================================================================
+-- VALIDATION RULE TEMPLATE for {entity_name}
+-- Rule: {business_rule}
+-- AGENT INSTRUCTIONS:
+-- 1. PARAMETER SECTION: rec_ contains all table fields for validation
+-- 2. VALIDATION LOGIC: Add IF statements to check business rules  
+-- 3. ERROR HANDLING: Use Error_SYS.Record_General for validation failures
+-- 4. FIELD ACCESS: Use rec_.field_name to access table columns
+-- =============================================================================
+
+PROCEDURE Validate_{entity_name}_Rule___ (
+   rec_ IN OUT {entity_name.lower()}_tab%ROWTYPE ) IS
+BEGIN
+   -- =============================================================================
+   -- VALIDATION LOGIC SECTION - AGENTS ADD VALIDATION CHECKS HERE
+   -- =============================================================================
+   
+   -- AGENT: Add field validation checks using IF statements
+   -- AGENT: Example field validation:
+   IF rec_.some_field IS NULL THEN
+      Error_SYS.Record_General(
+         lu_name_, 
+         'FIELD_REQUIRED: Field :P1 is required',
+         'Some Field');  -- AGENT: Replace with actual field name
+   END IF;
+   
+   -- AGENT: Add business rule validations here
+   -- AGENT: Example business rule check:
+   -- IF rec_.start_date > rec_.end_date THEN
+   --    Error_SYS.Record_General(lu_name_, 'INVALID_DATE_RANGE: Start date cannot be after end date');
+   -- END IF;
+   
+   -- AGENT: Add more validation logic below
+   
+END Validate_{entity_name}_Rule___;""",
+                "calculation": f"""-- =============================================================================
+-- CALCULATION RULE TEMPLATE for {entity_name}
+-- Rule: {business_rule}
+-- AGENT INSTRUCTIONS:
+-- 1. PARAMETER SECTION: rec_ contains input data for calculations
+-- 2. VARIABLE SECTION: Declare local variables for intermediate results
+-- 3. CALCULATION LOGIC: Implement business calculation formulas
+-- 4. RETURN SECTION: Return calculated result
+-- =============================================================================
+
+FUNCTION Calculate_{entity_name}_Value___ (
+   rec_ IN {entity_name.lower()}_tab%ROWTYPE ) RETURN NUMBER IS
+   
+   -- =============================================================================
+   -- VARIABLE DECLARATIONS - AGENTS DECLARE CALCULATION VARIABLES HERE
+   -- =============================================================================
+   result_ NUMBER := 0;           -- AGENT: Main result variable
+   intermediate_ NUMBER := 0;     -- AGENT: Add intermediate calculation variables
+   factor_ NUMBER := 1;           -- AGENT: Add factor/multiplier variables
+   
+BEGIN
+   -- =============================================================================
+   -- CALCULATION LOGIC SECTION - AGENTS ADD CALCULATION FORMULAS HERE
+   -- =============================================================================
+   
+   -- AGENT: Implement main calculation logic
+   -- AGENT: Example basic calculation:
+   result_ := rec_.quantity * rec_.unit_price;  -- AGENT: Replace with actual fields
+   
+   -- AGENT: Add conditional calculations based on business rules
+   -- AGENT: Example discount calculation:
+   IF rec_.discount_percent > 0 THEN
+      result_ := result_ * (1 - rec_.discount_percent / 100);
+   END IF;
+   
+   -- AGENT: Add more complex calculations here
+   -- AGENT: Example multi-step calculation:
+   -- intermediate_ := Calculate_Tax_Amount(result_, rec_.tax_code);
+   -- result_ := result_ + intermediate_;
+   
+   -- =============================================================================
+   -- RETURN CALCULATED RESULT
+   -- =============================================================================
+   RETURN result_;  -- AGENT: Return final calculated value
+   
+END Calculate_{entity_name}_Value___;""",
+                "workflow": f"""-- =============================================================================
+-- WORKFLOW RULE TEMPLATE for {entity_name}
+-- Rule: {business_rule}
+-- AGENT INSTRUCTIONS:
+-- 1. PARAMETER SECTION: rec_ for record data, action_ for workflow action
+-- 2. STATE MANAGEMENT: Update rec_.state based on action
+-- 3. VALIDATION LOGIC: Check conditions before state transitions
+-- 4. LOGGING: Record state changes for audit trail
+-- =============================================================================
+
+PROCEDURE Process_{entity_name}_Workflow___ (
+   rec_ IN OUT {entity_name.lower()}_tab%ROWTYPE,   -- AGENT: Record to process
+   action_ IN VARCHAR2 ) IS                          -- AGENT: Workflow action (START/COMPLETE/CANCEL/etc)
+BEGIN
+   -- =============================================================================
+   -- WORKFLOW ACTION PROCESSING - AGENTS ADD ACTION HANDLING HERE
+   -- =============================================================================
+   
+   -- AGENT: Use CASE statement to handle different workflow actions
+   CASE action_
+   WHEN 'START' THEN
+      -- AGENT: Handle workflow start action
+      rec_.state := 'InProgress';              -- AGENT: Set appropriate state
+      rec_.started_date := SYSDATE;            -- AGENT: Set timestamp fields
+      -- AGENT: Add additional start logic here
+      
+   WHEN 'COMPLETE' THEN
+      -- AGENT: Handle workflow completion action
+      -- AGENT: Add completion condition checks
+      IF rec_.all_items_delivered = 'TRUE' THEN  -- AGENT: Replace with actual conditions
+         rec_.state := 'Completed';
+         rec_.completed_date := SYSDATE;
+      ELSE
+         Error_SYS.Record_General(
+            lu_name_, 
+            'CANNOT_COMPLETE: Cannot complete - conditions not met');
+      END IF;
+      
+   WHEN 'CANCEL' THEN
+      -- AGENT: Handle workflow cancellation action
+      rec_.state := 'Cancelled';
+      rec_.cancelled_date := SYSDATE;
+      -- AGENT: Add cancellation logic here
+      
+   -- AGENT: Add more workflow actions here as needed
+   ELSE
+      Error_SYS.Record_General(lu_name_, 'INVALID_ACTION: Invalid workflow action :P1', action_);
+      
+   END CASE;
+   
+   -- =============================================================================
+   -- AUDIT LOGGING SECTION - AGENTS ADD LOGGING HERE
+   -- =============================================================================
+   
+   -- AGENT: Log state change for audit trail
+   {entity_name}_History_API.Create_Entry(
+      rec_.id,                                 -- AGENT: Record identifier
+      action_,                                 -- AGENT: Action performed
+      rec_.state,                              -- AGENT: New state
+      Fnd_Session_API.Get_Fnd_User);          -- AGENT: Current user
+      
+END Process_{entity_name}_Workflow___;""",
+                "trigger": f"""-- =============================================================================
+-- TRIGGER RULE TEMPLATE for {entity_name}
+-- Rule: {business_rule}
+-- AGENT INSTRUCTIONS:
+-- 1. PARAMETER SECTION: old_rec_, new_rec_ for before/after data, action_ for operation type
+-- 2. ACTION HANDLING: Use IF/CASE to handle INSERT/UPDATE/DELETE operations
+-- 3. CHANGE DETECTION: Compare old_rec_ vs new_rec_ to detect field changes
+-- 4. SIDE EFFECTS: Call other APIs to update related entities
+-- =============================================================================
+
+PROCEDURE Handle_{entity_name}_Change___ (
+   old_rec_ IN {entity_name.lower()}_tab%ROWTYPE,   -- AGENT: Record before change
+   new_rec_ IN {entity_name.lower()}_tab%ROWTYPE,   -- AGENT: Record after change  
+   action_ IN VARCHAR2 ) IS                          -- AGENT: Operation type (INSERT/UPDATE/DELETE)
+BEGIN
+   -- =============================================================================
+   -- TRIGGER ACTION PROCESSING - AGENTS ADD ACTION HANDLING HERE
+   -- =============================================================================
+   
+   -- AGENT: Handle different database operations
+   IF action_ = 'INSERT' THEN
+      -- =============================================================================
+      -- INSERT HANDLING - AGENTS ADD NEW RECORD LOGIC HERE
+      -- =============================================================================
+      
+      -- AGENT: Handle new record creation logic
+      Generate_{entity_name}_Number___(new_rec_);     -- AGENT: Auto-generate numbers/codes
+      -- AGENT: Add initialization logic here
+      -- AGENT: Set default values, create related records, etc.
+      
+   ELSIF action_ = 'UPDATE' THEN
+      -- =============================================================================
+      -- UPDATE HANDLING - AGENTS ADD CHANGE DETECTION LOGIC HERE  
+      -- =============================================================================
+      
+      -- AGENT: Handle record updates - check for specific field changes
+      IF old_rec_.important_field != new_rec_.important_field THEN
+         -- AGENT: Important field changed - trigger business logic
+         Update_Related_Entities___(new_rec_);        -- AGENT: Update related data
+         Send_Notification___(new_rec_, 'FIELD_CHANGED'); -- AGENT: Send notifications
+      END IF;
+      
+      -- AGENT: Add more field change checks here
+      -- IF old_rec_.status != new_rec_.status THEN
+      --    Handle_Status_Change___(old_rec_, new_rec_);
+      -- END IF;
+      
+   ELSIF action_ = 'DELETE' THEN
+      -- =============================================================================
+      -- DELETE HANDLING - AGENTS ADD DELETION LOGIC HERE
+      -- =============================================================================
+      
+      -- AGENT: Handle record deletion
+      Check_Delete_Restrictions___(old_rec_);         -- AGENT: Validate deletion is allowed
+      Clean_Related_Data___(old_rec_);               -- AGENT: Clean up related records
+      -- AGENT: Add archival, audit logging, etc.
+      
+   END IF;
+   
+   -- =============================================================================
+   -- COMMON TRIGGER LOGIC - AGENTS ADD LOGIC FOR ALL OPERATIONS HERE
+   -- =============================================================================
+   
+   -- AGENT: Add logic that runs for all trigger events
+   -- Log_Entity_Change___(old_rec_, new_rec_, action_);
+   
+END Handle_{entity_name}_Change___;""",
+            }
+
+            template = templates.get(rule_type, templates["validation"])
+
+            return f"""Business Logic Template Generated:
+
+**Entity:** {entity_name}
+**Rule Type:** {rule_type.title()}
+**Business Rule:** {business_rule}
+
+```sql
+{template}
+```
+
+**Implementation Notes:**
+1. Add this code to the {entity_name}_API package body
+2. Call from appropriate trigger points (Insert___, Update___, Delete___)
+3. Test thoroughly with various scenarios
+4. Add proper error handling and logging
+5. Consider performance implications for large datasets"""
+
+        @self.mcp.tool()
+        async def get_ifs_architecture_recommendations(
+            use_case: str,
+            complexity: str = "medium",
+            integration_needs: Optional[str] = None,
+        ) -> str:
+            """Get IFS Cloud architecture recommendations for specific use cases.
+
+            Args:
+                use_case: Description of the use case or requirement
+                complexity: Complexity level (simple, medium, complex)
+                integration_needs: External integration requirements
+            """
+
+            recommendations = {
+                "simple": {
+                    "description": "Single entity with basic CRUD operations",
+                    "components": ["Entity definition", "Basic API", "Simple views"],
+                    "patterns": ["Single table", "Basic validation", "Standard CRUD"],
+                },
+                "medium": {
+                    "description": "Multi-entity with business logic and workflows",
+                    "components": [
+                        "Master-detail entities",
+                        "Business APIs",
+                        "Projection/Client",
+                        "State machines",
+                    ],
+                    "patterns": [
+                        "Master-detail",
+                        "State management",
+                        "Business validation",
+                        "Event handling",
+                    ],
+                },
+                "complex": {
+                    "description": "Full enterprise solution with integrations",
+                    "components": [
+                        "Entity hierarchy",
+                        "Complex APIs",
+                        "Integration points",
+                        "Custom components",
+                        "Reports",
+                    ],
+                    "patterns": [
+                        "Microservices",
+                        "Event sourcing",
+                        "CQRS",
+                        "Integration patterns",
+                        "Performance optimization",
+                    ],
+                },
+            }
+
+            selected_complexity = recommendations.get(
+                complexity, recommendations["medium"]
+            )
+
+            response_lines = [
+                f"IFS Cloud Architecture Recommendations",
+                "=" * 45,
+                "",
+                f"Use Case: {use_case}",
+                f"Complexity Level: {complexity.title()}",
+                "",
+            ]
+
+            if integration_needs:
+                response_lines.extend([f"Integration Needs: {integration_needs}", ""])
+
+            response_lines.extend(
+                [
+                    "Architecture Overview:",
+                    f"  {selected_complexity['description']}",
+                    "",
+                    "Required Components:",
+                ]
+            )
+
+            for component in selected_complexity["components"]:
+                response_lines.append(f"  • {component}")
+
+            response_lines.extend(
+                [
+                    "",
+                    "Recommended Patterns:",
+                ]
+            )
+
+            for pattern in selected_complexity["patterns"]:
+                response_lines.append(f"  • {pattern}")
+
+            # Add specific recommendations based on use case keywords
+            use_case_lower = use_case.lower()
+
+            response_lines.extend(
+                [
+                    "",
+                    "Specific Recommendations:",
+                ]
+            )
+
+            if "order" in use_case_lower or "sales" in use_case_lower:
+                response_lines.extend(
+                    [
+                        "  • Implement order state machine (Planned → Released → Completed)",
+                        "  • Use master-detail pattern for order headers and lines",
+                        "  • Add pricing and discount calculations",
+                        "  • Integrate with inventory for availability checks",
+                    ]
+                )
+            elif "inventory" in use_case_lower or "stock" in use_case_lower:
+                response_lines.extend(
+                    [
+                        "  • Implement inventory tracking with transactions",
+                        "  • Use location-based inventory management",
+                        "  • Add serial/lot number tracking if needed",
+                        "  • Implement reservation mechanisms",
+                    ]
+                )
+            elif "customer" in use_case_lower or "contact" in use_case_lower:
+                response_lines.extend(
+                    [
+                        "  • Design customer hierarchy (companies, contacts, addresses)",
+                        "  • Implement customer classification and segmentation",
+                        "  • Add communication preferences and history",
+                        "  • Consider GDPR compliance requirements",
+                    ]
+                )
+            else:
+                response_lines.extend(
+                    [
+                        "  • Follow IFS naming conventions and standards",
+                        "  • Implement proper audit trail (created_by, created_date)",
+                        "  • Add appropriate indexes for performance",
+                        "  • Design with scalability in mind",
+                    ]
+                )
+
+            if integration_needs:
+                response_lines.extend(
+                    [
+                        "",
+                        "Integration Architecture:",
+                        "  • Use IFS Connect for external system integration",
+                        "  • Implement REST APIs for real-time integration",
+                        "  • Consider event-driven architecture for loose coupling",
+                        "  • Plan for data synchronization and conflict resolution",
+                    ]
+                )
+
+            response_lines.extend(
+                [
+                    "",
+                    "Best Practices:",
+                    "  • Start with core entities and expand incrementally",
+                    "  • Design APIs first, then implement storage",
+                    "  • Use IFS standard patterns and conventions",
+                    "  • Plan for internationalization and localization",
+                    "  • Implement proper security and authorization",
+                    "  • Design for testability and maintainability",
+                ]
+            )
+
+            return "\\n".join(response_lines)
+
+        @self.mcp.tool()
+        async def analyze_codebase_patterns(
+            pattern_type: str = "all",
+            limit: int = 20,
+        ) -> str:
+            """Analyze existing codebase patterns to learn IFS Cloud conventions.
+
+            **AGENT INSTRUCTIONS:**
+            This tool analyzes real IFS Cloud production code to extract patterns and conventions.
+
+            **When to use:**
+            - Learning IFS Cloud naming conventions
+            - Understanding code organization patterns
+            - Finding examples of how to structure new code
+            - Discovering API patterns and best practices
+
+            **Pattern types:**
+            - "naming": Analyzes naming conventions for entities, APIs, modules
+            - "structure": Examines file organization and architecture patterns
+            - "api": Studies API design patterns and method conventions
+            - "all": Comprehensive analysis of all pattern types
+
+            **What you'll learn:**
+            - Entity naming: CustomerOrder, ProductItem, WorkOrderHeader
+            - API patterns: Entity_API, Logical_Unit_Util_API
+            - Module structure: How ORDER module organizes entities/APIs
+            - File types: Which files belong together (.entity, .plsql, .client)
+
+            **Examples:**
+            - Study naming: analyze_codebase_patterns("naming", 30)
+            - API patterns: analyze_codebase_patterns("api", 15)
+            - Full analysis: analyze_codebase_patterns("all", 50)
+
+            **Output:** Detailed analysis of patterns with specific examples from production code
+
+            Args:
+                pattern_type: Type of patterns to analyze (naming, structure, api, all)
+                limit: Maximum examples to show
+            """
+
+            # Get all files from index
+            results = self.indexer.search_deduplicated(query="*", limit=limit * 3)
+
+            patterns = {
+                "naming": {
+                    "entities": [],
+                    "apis": [],
+                    "modules": [],
+                    "logical_units": [],
+                },
+                "structure": {"file_types": {}, "directories": set(), "modules": set()},
+                "api": {
+                    "crud_patterns": [],
+                    "validation_patterns": [],
+                    "business_logic_patterns": [],
+                },
+            }
+
+            for result in results:
+                # Analyze naming patterns
+                if result.type == ".entity":
+                    patterns["naming"]["entities"].append(result.name)
+                elif result.type == ".plsql":
+                    patterns["naming"]["apis"].append(result.name)
+
+                if result.module:
+                    patterns["structure"]["modules"].add(result.module)
+                    patterns["naming"]["modules"].append(result.module)
+
+                if result.logical_unit:
+                    patterns["naming"]["logical_units"].append(result.logical_unit)
+
+                # Count file types
+                file_type = result.type
+                patterns["structure"]["file_types"][file_type] = (
+                    patterns["structure"]["file_types"].get(file_type, 0) + 1
+                )
+
+                # Extract API patterns from content
+                content = getattr(result, "content", "").lower()
+                if "procedure new" in content or "procedure modify" in content:
+                    patterns["api"]["crud_patterns"].append(result.name)
+                if "validate" in content or "check_" in content:
+                    patterns["api"]["validation_patterns"].append(result.name)
+                if "calculate" in content or "process_" in content:
+                    patterns["api"]["business_logic_patterns"].append(result.name)
+
+            response_lines = [f"IFS Cloud Codebase Pattern Analysis", "=" * 40, ""]
+
+            if pattern_type in ["naming", "all"]:
+                response_lines.extend(["NAMING PATTERNS:", "-" * 16, ""])
+
+                if patterns["naming"]["entities"]:
+                    response_lines.append("Entity Naming Examples:")
+                    for entity in patterns["naming"]["entities"][:10]:
+                        response_lines.append(f"  • {entity}")
+                    response_lines.append("")
+
+                if patterns["naming"]["apis"]:
+                    response_lines.append("API Naming Examples:")
+                    for api in patterns["naming"]["apis"][:10]:
+                        response_lines.append(f"  • {api}")
+                    response_lines.append("")
+
+                if patterns["naming"]["modules"]:
+                    modules = list(set(patterns["naming"]["modules"]))
+                    response_lines.append(f"Modules Found ({len(modules)}):")
+                    for module in modules[:10]:
+                        response_lines.append(f"  • {module}")
+                    response_lines.append("")
+
+            if pattern_type in ["structure", "all"]:
+                response_lines.extend(["STRUCTURE PATTERNS:", "-" * 18, ""])
+
+                response_lines.append("File Type Distribution:")
+                for file_type, count in sorted(
+                    patterns["structure"]["file_types"].items()
+                ):
+                    response_lines.append(f"  • {file_type}: {count} files")
+                response_lines.append("")
+
+                if patterns["structure"]["modules"]:
+                    response_lines.append(
+                        f"Modules in Codebase ({len(patterns['structure']['modules'])}):"
+                    )
+                    for module in sorted(patterns["structure"]["modules"])[:15]:
+                        response_lines.append(f"  • {module}")
+                    response_lines.append("")
+
+            if pattern_type in ["api", "all"]:
+                response_lines.extend(["API PATTERNS:", "-" * 13, ""])
+
+                if patterns["api"]["crud_patterns"]:
+                    response_lines.append("Files with CRUD Patterns:")
+                    for file in patterns["api"]["crud_patterns"][:10]:
+                        response_lines.append(f"  • {file}")
+                    response_lines.append("")
+
+                if patterns["api"]["validation_patterns"]:
+                    response_lines.append("Files with Validation Patterns:")
+                    for file in patterns["api"]["validation_patterns"][:10]:
+                        response_lines.append(f"  • {file}")
+                    response_lines.append("")
+
+                if patterns["api"]["business_logic_patterns"]:
+                    response_lines.append("Files with Business Logic Patterns:")
+                    for file in patterns["api"]["business_logic_patterns"][:10]:
+                        response_lines.append(f"  • {file}")
+                    response_lines.append("")
+
+            # Add insights and recommendations
+            response_lines.extend(["INSIGHTS & RECOMMENDATIONS:", "-" * 27, ""])
+
+            # Naming convention insights
+            if patterns["naming"]["entities"]:
+                entity_names = patterns["naming"]["entities"]
+                if any("_" in name for name in entity_names):
+                    response_lines.append("• Entities use underscore naming convention")
+                else:
+                    response_lines.append("• Entities use CamelCase naming convention")
+
+            # Module analysis
+            if len(patterns["structure"]["modules"]) > 5:
+                response_lines.append(
+                    f"• Large codebase with {len(patterns['structure']['modules'])} modules - consider modular development"
+                )
+            elif len(patterns["structure"]["modules"]) < 3:
+                response_lines.append(
+                    "• Small focused codebase - good for targeted customizations"
+                )
+
+            # API pattern recommendations
+            if len(patterns["api"]["crud_patterns"]) > len(
+                patterns["api"]["validation_patterns"]
+            ):
+                response_lines.append(
+                    "• Consider adding more validation patterns for data integrity"
+                )
+
+            return "\\n".join(response_lines)
+
+        @self.mcp.tool()
+        async def create_ifs_development_plan(
+            project_name: str,
+            requirements: str,
+            timeline: str = "medium",
+            team_size: str = "small",
+        ) -> str:
+            """Create a comprehensive development plan for IFS Cloud customization.
+
+            Args:
+                project_name: Name of the development project
+                requirements: High-level requirements description
+                timeline: Project timeline (short, medium, long)
+                team_size: Team size (small, medium, large)
+            """
+
+            timelines = {
+                "short": {"weeks": "2-6", "phases": 3},
+                "medium": {"weeks": "8-16", "phases": 4},
+                "long": {"weeks": "20-40", "phases": 5},
+            }
+
+            team_configs = {
+                "small": {"developers": "1-2", "focus": "core functionality"},
+                "medium": {"developers": "3-5", "focus": "full feature set"},
+                "large": {"developers": "6+", "focus": "enterprise solution"},
+            }
+
+            timeline_info = timelines.get(timeline, timelines["medium"])
+            team_info = team_configs.get(team_size, team_configs["small"])
+
+            response_lines = [
+                f"IFS Cloud Development Plan: {project_name}",
+                "=" * (30 + len(project_name)),
+                "",
+                "PROJECT OVERVIEW:",
+                f"  Timeline: {timeline_info['weeks']} weeks",
+                f"  Team Size: {team_info['developers']} developers",
+                f"  Focus: {team_info['focus']}",
+                "",
+                f"Requirements: {requirements}",
+                "",
+            ]
+
+            # Phase planning
+            response_lines.extend(["DEVELOPMENT PHASES:", "-" * 19, ""])
+
+            phases = []
+            if timeline_info["phases"] >= 3:
+                phases.extend(
+                    [
+                        (
+                            "Phase 1: Analysis & Design",
+                            [
+                                "Analyze existing codebase patterns",
+                                "Design entity relationships",
+                                "Define API specifications",
+                                "Create database schema",
+                                "Plan integration points",
+                            ],
+                        ),
+                        (
+                            "Phase 2: Core Development",
+                            [
+                                "Implement entity definitions",
+                                "Create basic CRUD operations",
+                                "Develop business logic APIs",
+                                "Build validation rules",
+                                "Create unit tests",
+                            ],
+                        ),
+                        (
+                            "Phase 3: Integration & Testing",
+                            [
+                                "Implement frontend views",
+                                "Add integration points",
+                                "Perform system testing",
+                                "User acceptance testing",
+                                "Performance optimization",
+                            ],
+                        ),
+                    ]
+                )
+
+            if timeline_info["phases"] >= 4:
+                phases.insert(
+                    2,
+                    (
+                        "Phase 2.5: Business Logic",
+                        [
+                            "Implement complex business rules",
+                            "Add state machines and workflows",
+                            "Create calculation engines",
+                            "Develop reporting features",
+                            "Add advanced validations",
+                        ],
+                    ),
+                )
+
+            if timeline_info["phases"] >= 5:
+                phases.append(
+                    (
+                        "Phase 4: Enterprise Features",
+                        [
+                            "Add security and authorization",
+                            "Implement audit trails",
+                            "Create integration adapters",
+                            "Add monitoring and logging",
+                            "Performance tuning",
+                        ],
+                    )
+                )
+
+            for phase_name, tasks in phases:
+                response_lines.extend([phase_name, "-" * len(phase_name)])
+                for task in tasks:
+                    response_lines.append(f"  • {task}")
+                response_lines.append("")
+
+            # Deliverables
+            response_lines.extend(["KEY DELIVERABLES:", "-" * 17, ""])
+
+            deliverables = [
+                "Entity definitions (.entity files)",
+                "PL/SQL API packages (.plsql files)",
+                "Database views and projections",
+                "Frontend pages and components (.views files)",
+                "Integration specifications",
+                "Test suites and documentation",
+                "Deployment scripts",
+            ]
+
+            if team_size in ["medium", "large"]:
+                deliverables.extend(
+                    [
+                        "Performance monitoring setup",
+                        "Security implementation",
+                        "User training materials",
+                    ]
+                )
+
+            for deliverable in deliverables:
+                response_lines.append(f"  • {deliverable}")
+
+            response_lines.extend(["", "RISK MITIGATION:", "-" * 16, ""])
+
+            risks = [
+                "Regular code reviews to maintain quality",
+                "Continuous integration for early issue detection",
+                "Prototype critical features early",
+                "Maintain good communication with stakeholders",
+                "Plan for IFS Cloud version compatibility",
+            ]
+
+            if timeline == "short":
+                risks.append("Focus on MVP to meet tight deadline")
+            elif timeline == "long":
+                risks.append("Regular milestone reviews to prevent scope creep")
+
+            for risk in risks:
+                response_lines.append(f"  • {risk}")
+
+            response_lines.extend(["", "SUCCESS METRICS:", "-" * 15, ""])
+
+            metrics = [
+                "All functional requirements implemented",
+                "Performance meets IFS Cloud standards",
+                "Code passes quality gates and reviews",
+                "Integration tests pass successfully",
+                "User acceptance criteria met",
+                "Documentation complete and reviewed",
+            ]
+
+            for metric in metrics:
+                response_lines.append(f"  • {metric}")
+
+            response_lines.extend(["", "RECOMMENDED TOOLS:", "-" * 18, ""])
+
+            tools = [
+                "Use this MCP server for code generation and analysis",
+                "IFS Developer Studio for development",
+                "Version control (Git) for code management",
+                "Continuous Integration pipeline",
+                "Automated testing frameworks",
+                "Code quality tools (SonarQube, etc.)",
+            ]
+
+            for tool in tools:
+                response_lines.append(f"  • {tool}")
+
+            return "\\n".join(response_lines)
+
+        @self.mcp.tool()
+        async def generate_projection_template(
+            entity_name: str,
+            projection_type: str = "standard",
+            include_crud: bool = True,
+            include_actions: bool = True,
+        ) -> str:
+            """Generate IFS Cloud projection template for frontend integration.
+
+            **AGENT INSTRUCTIONS:**
+            This tool creates IFS Cloud projection files (.projection) for frontend UI integration.
+
+            **When to use:**
+            - Creating backend projections for frontend pages
+            - Exposing entity data to IFS Cloud clients
+            - Setting up CRUD operations for UI components
+            - Defining actions and functions for frontend consumption
+
+            **Projection types:**
+            - standard: Basic CRUD projection for single entity
+            - masterdetail: Master-detail projection with nested entities
+            - readonly: Read-only projection for reporting/viewing
+            - custom: Custom projection with specific business logic
+
+            **Examples:**
+            - Basic projection: generate_projection_template("CustomerOrder")
+            - Read-only view: generate_projection_template("OrderReport", "readonly", False, False)
+            - Master-detail: generate_projection_template("CustomerOrder", "masterdetail")
+
+            **Output:** Complete IFS Cloud projection file with CRUD operations and UI bindings
+
+            Args:
+                entity_name: Target entity name (e.g., 'CustomerOrder')
+                projection_type: Type of projection (standard, masterdetail, readonly, custom)
+                include_crud: Include Create/Read/Update/Delete operations
+                include_actions: Include custom actions and functions
+            """
+
+            template = f"""-- =============================================================================
+-- IFS CLOUD PROJECTION TEMPLATE for {entity_name}
+-- Type: {projection_type.title()} Projection
+-- AGENT INSTRUCTIONS:
+-- 1. PROJECTION HEADER: Define projection name and version
+-- 2. ENTITY SETS: Map database entities to projection entities
+-- 3. CRUD OPERATIONS: Define Create/Read/Update/Delete operations
+-- 4. ACTIONS: Add custom business actions
+-- 5. FUNCTIONS: Add data retrieval functions
+-- =============================================================================
+
+projection {entity_name}Handling version "24.2.0";
+
+-- =============================================================================
+-- PROJECTION DESCRIPTION SECTION - AGENTS UPDATE DESCRIPTION HERE
+-- =============================================================================
+description = "{entity_name} management and handling operations";
+
+-- =============================================================================
+-- ENTITY SETS SECTION - AGENTS DEFINE DATA ENTITIES HERE
+-- =============================================================================
+
+-- AGENT: Main entity set - maps to database table/view
+entityset {entity_name}Set for {entity_name} {{
+   -- AGENT: Define entity attributes from database
+   attribute Id Text;                    -- AGENT: Primary key field
+   attribute Description Text;           -- AGENT: Description field
+   attribute State Enumeration(State);   -- AGENT: State field for workflow
+   attribute CreatedDate Timestamp;      -- AGENT: Created timestamp
+   attribute CreatedBy Text;             -- AGENT: Created by user
+   
+   -- AGENT: Add more attributes based on entity structure
+   -- attribute CustomField Text;
+   -- attribute Amount Number;
+   -- attribute Date Date;
+   
+   -- =============================================================================
+   -- ENTITY REFERENCES SECTION - AGENTS ADD FOREIGN KEY REFERENCES HERE
+   -- =============================================================================
+   
+   -- AGENT: Add references to related entities
+   -- reference CustomerId to Customer(CustomerId) {{
+   --    label = "Customer";
+   -- }}
+   
+   -- =============================================================================
+   -- ENTITY ARRAYS SECTION - AGENTS ADD CHILD/DETAIL COLLECTIONS HERE
+   -- ============================================================================="""
+
+            if projection_type == "masterdetail":
+                template += f"""
+   
+   -- AGENT: Master-detail arrays for child entities
+   array {entity_name}Lines({entity_name}Id) to {entity_name}Line {{
+      -- AGENT: Define detail/line entity attributes
+      attribute LineNo Number;
+      attribute ItemId Text;
+      attribute Quantity Number;
+      attribute UnitPrice Number;
+      -- AGENT: Add more line attributes as needed
+   }}
+"""
+
+            template += f"""
+}}
+
+-- =============================================================================
+-- ACTIONS SECTION - AGENTS ADD BUSINESS ACTIONS HERE
+-- ============================================================================="""
+
+            if include_actions:
+                template += f"""
+
+-- AGENT: Custom business actions that modify data
+action Create{entity_name} {{
+   parameter Description Text;           -- AGENT: Input parameters
+   parameter CustomerId Text;           -- AGENT: Add parameters as needed
+   -- AGENT: Add more input parameters here
+}} returns {entity_name}Set;
+
+action Update{entity_name}State {{
+   parameter Id Text;                   -- AGENT: Record identifier
+   parameter NewState Enumeration(State); -- AGENT: Target state
+   parameter Reason Text;               -- AGENT: Reason for state change
+}} returns {entity_name}Set;
+
+-- AGENT: Add more custom actions here
+-- action Process{entity_name} {{ ... }}
+-- action Cancel{entity_name} {{ ... }}
+"""
+
+            template += f"""
+
+-- =============================================================================
+-- FUNCTIONS SECTION - AGENTS ADD DATA RETRIEVAL FUNCTIONS HERE
+-- ============================================================================="""
+
+            if include_crud:
+                template += f"""
+
+-- AGENT: Data retrieval functions (read-only operations)
+function Get{entity_name}Details {{
+   parameter Id Text;                   -- AGENT: Record identifier
+}} returns {entity_name}Set;
+
+function Search{entity_name}s {{
+   parameter SearchText Text;           -- AGENT: Search criteria
+   parameter State Enumeration(State);  -- AGENT: Filter by state
+   parameter CreatedFrom Date;          -- AGENT: Date range filters
+   parameter CreatedTo Date;
+}} returns {entity_name}Set;
+
+-- AGENT: Add more query functions here
+-- function Calculate{entity_name}Total {{ ... }}
+-- function Validate{entity_name}Data {{ ... }}
+"""
+
+            template += f"""
+
+-- =============================================================================
+-- ENUMERATIONS SECTION - AGENTS DEFINE ENUMERATION VALUES HERE
+-- =============================================================================
+
+-- AGENT: Define enumeration for state values
+enumeration State {{
+   value "Planned" {{
+      identifier = "Planned";
+      label = "Planned";
+   }}
+   value "Active" {{
+      identifier = "Active"; 
+      label = "Active";
+   }}
+   value "Completed" {{
+      identifier = "Completed";
+      label = "Completed";
+   }}
+   value "Cancelled" {{
+      identifier = "Cancelled";
+      label = "Cancelled";
+   }}
+   -- AGENT: Add more state values as needed
+}}
+
+-- AGENT: Add more enumerations here as needed
+-- enumeration Priority {{ ... }}
+-- enumeration Type {{ ... }}
+
+-- =============================================================================
+-- END OF PROJECTION
+-- ============================================================================="""
+
+            return f"Generated IFS Cloud Projection Template:\\n\\n**Entity:** {entity_name}\\n**Type:** {projection_type.title()}\\n**Include CRUD:** {include_crud}\\n**Include Actions:** {include_actions}\\n\\n```projection\\n{template}\\n```\\n\\n**Implementation Notes:**\\n1. Save as {entity_name}Handling.projection\\n2. Update entity attributes to match database schema\\n3. Add proper references to related entities\\n4. Test CRUD operations thoroughly\\n5. Validate enumeration values match business requirements"
+
+        @self.mcp.tool()
+        async def generate_client_template(
+            entity_name: str,
+            client_type: str = "standard",
+            include_pages: bool = True,
+            include_lists: bool = True,
+        ) -> str:
+            """Generate IFS Cloud client template for frontend UI definition.
+
+            **AGENT INSTRUCTIONS:**
+            This tool creates IFS Cloud client files (.client) for frontend UI components.
+
+            **When to use:**
+            - Creating frontend UI definitions
+            - Defining pages, lists, and navigation
+            - Setting up user interface layouts
+            - Integrating with projection data sources
+
+            **Client types:**
+            - standard: Basic client with pages and lists
+            - navigator: Navigation-focused client with menu structure
+            - workspace: Workspace client with multiple tabs/views
+            - assistant: Assistant/wizard style client
+
+            **Examples:**
+            - Basic client: generate_client_template("CustomerOrder")
+            - Navigator: generate_client_template("OrderManagement", "navigator")
+            - Workspace: generate_client_template("CustomerOrder", "workspace")
+
+            **Output:** Complete IFS Cloud client file with UI components and navigation
+
+            Args:
+                entity_name: Target entity name (e.g., 'CustomerOrder')
+                client_type: Type of client (standard, navigator, workspace, assistant)
+                include_pages: Include page definitions
+                include_lists: Include list/grid definitions
+            """
+
+            template = f"""-- =============================================================================
+-- IFS CLOUD CLIENT TEMPLATE for {entity_name}
+-- Type: {client_type.title()} Client
+-- AGENT INSTRUCTIONS:
+-- 1. CLIENT HEADER: Define client name and projection binding
+-- 2. NAVIGATION: Set up menu and navigation structure  
+-- 3. PAGES: Define form pages for data entry/viewing
+-- 4. LISTS: Define grids/lists for data browsing
+-- 5. COMMANDS: Add toolbar commands and actions
+-- =============================================================================
+
+client {entity_name}Handling using {entity_name}HandlingProjection;
+
+-- =============================================================================
+-- CLIENT DESCRIPTION SECTION - AGENTS UPDATE DESCRIPTION HERE
+-- =============================================================================
+description = "{entity_name} management client interface";
+
+-- =============================================================================
+-- NAVIGATION SECTION - AGENTS DEFINE MENU STRUCTURE HERE
+-- ============================================================================="""
+
+            if client_type == "navigator":
+                template += f"""
+
+-- AGENT: Navigator structure for menu-based navigation
+navigator {{
+   entry {entity_name}NavigatorEntry parent EnterprisePlatformNavigator.OrderMgtNavigator at index 100 {{
+      label = "{entity_name} Management";
+      
+      -- AGENT: Add navigation entries for different views
+      entry {entity_name}ListEntry {{
+         label = "{entity_name} Overview";
+         page List;
+      }}
+      
+      entry New{entity_name}Entry {{
+         label = "Create {entity_name}";
+         page {entity_name}Page/New;
+      }}
+      
+      -- AGENT: Add more navigation entries as needed
+   }}
+}}"""
+
+            template += f"""
+
+-- =============================================================================
+-- PAGES SECTION - AGENTS DEFINE FORM PAGES HERE
+-- ============================================================================="""
+
+            if include_pages:
+                template += f"""
+
+-- AGENT: Main entity page for viewing/editing records
+page {entity_name}Page using {entity_name}Set {{
+   label = "{entity_name}";
+   
+   -- =============================================================================
+   -- PAGE SELECTOR SECTION - AGENTS DEFINE SELECTION CRITERIA HERE
+   -- =============================================================================
+   selector {entity_name}Selector {{
+      -- AGENT: Key fields for record selection
+      field Id;
+      field Description;
+   }}
+   
+   -- =============================================================================
+   -- PAGE GROUPS SECTION - AGENTS ORGANIZE FIELDS INTO LOGICAL GROUPS HERE
+   -- =============================================================================
+   
+   -- AGENT: General information group
+   group General{{
+      label = "General Information";
+      
+      field Id {{
+         size = Small;
+         editable = [ETag == null];  -- AGENT: Only editable when creating new
+      }}
+      field Description {{
+         size = Large;
+      }}
+      field State {{
+         size = Small;
+         editable = [false];  -- AGENT: State managed by workflow
+      }}
+   }}
+   
+   -- AGENT: Dates and audit information group
+   group AuditInfo {{
+      label = "Audit Information";
+      
+      field CreatedDate {{
+         size = Small;
+         editable = [false];
+      }}
+      field CreatedBy {{
+         size = Small;
+         editable = [false];
+      }}
+   }}
+   
+   -- AGENT: Add more groups for organizing fields
+   -- group AdditionalInfo {{ ... }}
+   -- group FinancialInfo {{ ... }}
+   
+   -- =============================================================================
+   -- PAGE COMMANDS SECTION - AGENTS ADD TOOLBAR COMMANDS HERE
+   -- =============================================================================
+   
+   command Create{entity_name}Command {{
+      label = "Create";
+      enabled = [true];
+      execute {{
+         call Create{entity_name}(Description, CustomerId) {{
+            when Success {{
+               navigate back;
+            }}
+         }}
+      }}
+   }}
+   
+   command Update{entity_name}StateCommand {{
+      label = "Update State";
+      enabled = [State != "Completed"];
+      execute {{
+         call Update{entity_name}State(Id, NewState, Reason);
+      }}
+   }}
+   
+   -- AGENT: Add more commands as needed
+}}"""
+
+            template += f"""
+
+-- =============================================================================
+-- LISTS SECTION - AGENTS DEFINE DATA GRIDS/LISTS HERE
+-- ============================================================================="""
+
+            if include_lists:
+                template += f"""
+
+-- AGENT: Main list for browsing multiple records
+page List using {entity_name}Set {{
+   label = "{entity_name} List";
+   
+   -- =============================================================================
+   -- LIST STRUCTURE SECTION - AGENTS DEFINE COLUMNS AND LAYOUT HERE
+   -- =============================================================================
+   
+   list {entity_name}List {{
+      -- AGENT: Define list columns (fields to display)
+      field Id {{
+         size = Small;
+      }}
+      field Description {{
+         size = Large;
+      }}
+      field State {{
+         size = Small;
+      }}
+      field CreatedDate {{
+         size = Small;
+      }}
+      field CreatedBy {{
+         size = Small;
+      }}
+      
+      -- AGENT: Add more display fields as needed
+      
+      -- =============================================================================
+      -- LIST COMMANDS SECTION - AGENTS ADD ROW-LEVEL COMMANDS HERE
+      -- =============================================================================
+      
+      command {entity_name}DetailsCommand {{
+         label = "Details";
+         mode = SingleRecord;
+         execute {{
+            navigate "{entity_name}Page/Form?$filter=Id eq '${{Id}}'";
+         }}
+      }}
+      
+      command Update{entity_name}StateCommand {{
+         label = "Update State";
+         mode = SelectedRecords;
+         enabled = [State != "Completed"];
+         execute {{
+            call Update{entity_name}State(Id, NewState, Reason);
+         }}
+      }}
+      
+      -- AGENT: Add more row commands as needed
+   }}
+   
+   -- =============================================================================
+   -- PAGE COMMANDS SECTION - AGENTS ADD PAGE-LEVEL COMMANDS HERE
+   -- =============================================================================
+   
+   command New{entity_name}Command {{
+      label = "New";
+      execute {{
+         navigate "{entity_name}Page/New";
+      }}
+   }}
+   
+   command Refresh{entity_name}ListCommand {{
+      label = "Refresh";
+      execute {{
+         refresh;
+      }}
+   }}
+   
+   -- AGENT: Add more page commands as needed
+}}"""
+
+            template += f"""
+
+-- =============================================================================
+-- SEARCH CONTEXTS SECTION - AGENTS DEFINE SEARCH/FILTER CAPABILITIES HERE  
+-- =============================================================================
+
+searchcontext PageSearchContext for {entity_name}Set {{
+   -- AGENT: Define searchable fields
+   field Id;
+   field Description;
+   field State;
+   field CreatedBy;
+   
+   -- AGENT: Add more searchable fields as needed
+}}
+
+-- =============================================================================
+-- END OF CLIENT DEFINITION
+-- ============================================================================="""
+
+            return f"Generated IFS Cloud Client Template:\\n\\n**Entity:** {entity_name}\\n**Type:** {client_type.title()}\\n**Include Pages:** {include_pages}\\n**Include Lists:** {include_lists}\\n\\n```client\\n{template}\\n```\\n\\n**Implementation Notes:**\\n1. Save as {entity_name}Client.client\\n2. Ensure projection name matches exactly\\n3. Customize field sizes and editability rules\\n4. Add proper command permissions and security\\n5. Test navigation and page transitions\\n6. Validate search functionality works correctly"
+
+        @self.mcp.tool()
+        async def generate_fragment_template(
+            fragment_name: str,
+            fragment_type: str = "data",
+            target_entity: str = "",
+        ) -> str:
+            """Generate IFS Cloud fragment template for reusable UI components.
+
+            **AGENT INSTRUCTIONS:**
+            This tool creates IFS Cloud fragment files (.fragment) for reusable UI components.
+
+            **When to use:**
+            - Creating reusable UI components
+            - Sharing common functionality across multiple clients
+            - Building modular user interface elements
+            - Creating consistent UI patterns
+
+            **Fragment types:**
+            - data: Data-focused fragment with entity binding
+            - assistant: Wizard/assistant style fragment
+            - selector: Selection dialog fragment
+            - command: Reusable command fragment
+
+            **Examples:**
+            - Data fragment: generate_fragment_template("CustomerDetails", "data", "Customer")
+            - Assistant: generate_fragment_template("OrderWizard", "assistant", "CustomerOrder")
+            - Selector: generate_fragment_template("ProductSelector", "selector", "Product")
+
+            **Output:** Complete IFS Cloud fragment file with reusable UI components
+
+            Args:
+                fragment_name: Name of the fragment (e.g., 'CustomerDetails')
+                fragment_type: Type of fragment (data, assistant, selector, command)
+                target_entity: Target entity name if applicable
+            """
+
+            template = f"""-- =============================================================================
+-- IFS CLOUD FRAGMENT TEMPLATE for {fragment_name}
+-- Type: {fragment_type.title()} Fragment
+-- Target Entity: {target_entity if target_entity else 'N/A'}
+-- AGENT INSTRUCTIONS:
+-- 1. FRAGMENT HEADER: Define fragment name and parameters
+-- 2. GROUPS/SECTIONS: Organize UI elements into logical groups
+-- 3. FIELDS: Define input/display fields
+-- 4. COMMANDS: Add fragment-specific commands
+-- 5. REUSABILITY: Ensure fragment can be used in multiple contexts
+-- =============================================================================
+
+fragment {fragment_name};
+
+-- =============================================================================
+-- FRAGMENT DESCRIPTION SECTION - AGENTS UPDATE DESCRIPTION HERE
+-- =============================================================================
+description = "{fragment_name} reusable fragment component";"""
+
+            if target_entity:
+                template += f"""
+
+-- =============================================================================
+-- ENTITY BINDING SECTION - AGENTS BIND TO TARGET ENTITY HERE
+-- =============================================================================
+using {target_entity}Set;"""
+
+            if fragment_type == "data":
+                template += f"""
+
+-- =============================================================================
+-- DATA GROUP SECTION - AGENTS ORGANIZE DATA FIELDS HERE
+-- =============================================================================
+
+-- AGENT: Main data group for displaying/editing entity data
+group {fragment_name}Group {{
+   label = "{fragment_name}";
+   
+   -- =============================================================================
+   -- FIELD DEFINITIONS - AGENTS ADD DATA FIELDS HERE
+   -- =============================================================================
+   
+   -- AGENT: Primary fields for the entity
+   field Id {{
+      size = Small;
+      editable = [ETag == null];  -- AGENT: Editable only when creating
+   }}
+   
+   field Description {{
+      size = Large;
+      required = [true];           -- AGENT: Mark required fields
+   }}
+   
+   field State {{
+      size = Small;
+      editable = [false];          -- AGENT: Read-only state field
+   }}
+   
+   -- AGENT: Add more fields based on entity structure
+   -- field CustomField {{
+   --    size = Medium;
+   --    required = [condition];
+   -- }}
+   
+   -- =============================================================================
+   -- REFERENCE FIELDS - AGENTS ADD LOOKUP/REFERENCE FIELDS HERE
+   -- =============================================================================
+   
+   -- AGENT: Add reference fields for related entities
+   -- lov CustomerRef with Customer {{
+   --    label = "Customer";
+   --    description = CustomerRef.Name;
+   -- }}
+}}"""
+
+            elif fragment_type == "assistant":
+                template += f"""
+
+-- =============================================================================
+-- ASSISTANT STRUCTURE SECTION - AGENTS DEFINE WIZARD STEPS HERE
+-- =============================================================================
+
+-- AGENT: Assistant/wizard component for guided data entry
+assistant {fragment_name}Assistant {{
+   label = "{fragment_name} Assistant";
+   
+   -- =============================================================================
+   -- STEP DEFINITIONS - AGENTS ADD WIZARD STEPS HERE
+   -- =============================================================================
+   
+   -- AGENT: Step 1 - Basic information
+   step BasicInfo {{
+      label = "Basic Information";
+      
+      group BasicInfoGroup {{
+         field Description {{
+            size = Large;
+            required = [true];
+         }}
+         
+         -- AGENT: Add basic fields for step 1
+      }}
+   }}
+   
+   -- AGENT: Step 2 - Detailed information  
+   step DetailedInfo {{
+      label = "Detailed Information";
+      
+      group DetailedInfoGroup {{
+         -- AGENT: Add detailed fields for step 2
+         field AdditionalInfo {{
+            size = Large;
+         }}
+      }}
+   }}
+   
+   -- AGENT: Add more steps as needed
+   -- step ReviewAndConfirm {{ ... }}
+   
+   -- =============================================================================
+   -- ASSISTANT COMMANDS - AGENTS ADD NAVIGATION COMMANDS HERE
+   -- =============================================================================
+   
+   command NextStepCommand {{
+      label = "Next";
+      execute {{
+         -- AGENT: Add validation and navigation logic
+      }}
+   }}
+   
+   command PreviousStepCommand {{
+      label = "Previous";
+      execute {{
+         -- AGENT: Add navigation logic
+      }}
+   }}
+   
+   command FinishCommand {{
+      label = "Finish";
+      execute {{
+         -- AGENT: Add completion logic
+      }}
+   }}
+}}"""
+
+            elif fragment_type == "selector":
+                template += f"""
+
+-- =============================================================================
+-- SELECTOR STRUCTURE SECTION - AGENTS DEFINE SELECTION UI HERE
+-- =============================================================================
+
+-- AGENT: Selector component for choosing records
+selector {fragment_name}Selector {{
+   label = "Select {fragment_name}";
+   
+   -- =============================================================================
+   -- SELECTION LIST - AGENTS DEFINE SELECTABLE ITEMS HERE
+   -- =============================================================================
+   
+   list {fragment_name}List {{
+      -- AGENT: Define columns for selection
+      field Id {{
+         size = Small;
+      }}
+      field Description {{
+         size = Large;
+      }}
+      
+      -- AGENT: Add more display fields
+      
+      -- =============================================================================
+      -- SELECTION COMMANDS - AGENTS ADD SELECTION ACTIONS HERE
+      -- =============================================================================
+      
+      command SelectCommand {{
+         label = "Select";
+         mode = SingleRecord;
+         execute {{
+            -- AGENT: Add selection logic
+            exit Ok;
+         }}
+      }}
+   }}
+   
+   -- =============================================================================
+   -- SELECTOR COMMANDS - AGENTS ADD DIALOG COMMANDS HERE
+   -- =============================================================================
+   
+   command OkCommand {{
+      label = "OK";
+      execute {{
+         exit Ok;
+      }}
+   }}
+   
+   command CancelCommand {{
+      label = "Cancel";
+      execute {{
+         exit Cancel;
+      }}
+   }}
+}}"""
+
+            template += f"""
+
+-- =============================================================================
+-- FRAGMENT PARAMETERS SECTION - AGENTS DEFINE INPUT PARAMETERS HERE
+-- =============================================================================
+
+-- AGENT: Define parameters that can be passed to the fragment
+-- parameter EntityId Text;
+-- parameter Mode Enumeration(FragmentMode);
+-- parameter ReadOnly Boolean;
+
+-- =============================================================================
+-- END OF FRAGMENT DEFINITION
+-- ============================================================================="""
+
+            return f"Generated IFS Cloud Fragment Template:\\n\\n**Fragment:** {fragment_name}\\n**Type:** {fragment_type.title()}\\n**Target Entity:** {target_entity if target_entity else 'N/A'}\\n\\n```fragment\\n{template}\\n```\\n\\n**Implementation Notes:**\\n1. Save as {fragment_name}.fragment\\n2. Define clear parameters for reusability\\n3. Test fragment in multiple client contexts\\n4. Ensure proper data binding and validation\\n5. Add appropriate security and permission checks\\n6. Document fragment usage and integration points"
 
     def _format_search_results(self, results: List[SearchResult], title: str) -> str:
         """Format search results for display."""

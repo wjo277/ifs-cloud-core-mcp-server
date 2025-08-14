@@ -56,6 +56,7 @@ class WebUISearchResult(BaseModel):
     line_count: int
     complexity_score: float
     modified_time: datetime
+    hash: str  # Unique content hash for React keys
     module: Optional[str] = None
     logical_unit: Optional[str] = None
     entity_name: Optional[str] = None
@@ -72,6 +73,9 @@ class WebUISearchResult(BaseModel):
     # UI-specific fields
     highlight: str = ""
     tags: List[str] = []
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class IFSCloudWebUI:
@@ -110,7 +114,7 @@ class IFSCloudWebUI:
         @self.app.get("/", response_class=HTMLResponse)
         async def root(request: Request):
             """Serve the main search interface."""
-            return self.templates.TemplateResponse("index.html", {"request": request})
+            return self.templates.TemplateResponse("react.html", {"request": request})
 
         @self.app.get("/api/search")
         async def search(
@@ -142,7 +146,7 @@ class IFSCloudWebUI:
                     f"Performing search: query='{q}', limit={limit}, file_type={file_type}"
                 )
 
-                results = self.indexer.search(
+                results = self.indexer.search_deduplicated(
                     query=q,
                     limit=limit,
                     file_type=file_type,
@@ -150,7 +154,7 @@ class IFSCloudWebUI:
                     max_complexity=max_complexity,
                 )
 
-                logger.debug(f"Search returned {len(results)} results")
+                logger.debug(f"Search returned {len(results)} unique results")
 
                 # Convert to web UI format with enhanced data
                 web_results = []
@@ -185,6 +189,7 @@ class IFSCloudWebUI:
                         line_count=result.line_count,
                         complexity_score=result.complexity_score,
                         modified_time=result.modified_time,
+                        hash=result.hash,
                         module=result.module,
                         logical_unit=result.logical_unit,
                         entity_name=result.entity_name,
@@ -202,22 +207,19 @@ class IFSCloudWebUI:
                     )
                     web_results.append(web_result)
 
-                return JSONResponse(
-                    {
-                        "results": [
-                            {**r.dict(), "modified_time": r.modified_time.isoformat()}
-                            for r in web_results
-                        ],
-                        "total": len(web_results),
-                        "query": q,
-                        "filters": {
-                            "file_type": file_type,
-                            "module": module,
-                            "logical_unit": logical_unit,
-                            "complexity_range": [min_complexity, max_complexity],
-                        },
-                    }
-                )
+                # Use Pydantic's model_dump with mode='json' for proper serialization
+                response_data = {
+                    "results": [r.model_dump(mode="json") for r in web_results],
+                    "total": len(web_results),
+                    "query": q,
+                    "filters": {
+                        "file_type": file_type,
+                        "module": module,
+                        "logical_unit": logical_unit,
+                        "complexity_range": [min_complexity, max_complexity],
+                    },
+                }
+                return JSONResponse(response_data)
 
             except Exception as e:
                 logger.error(f"Search error: {type(e).__name__}: {e}")
@@ -243,7 +245,7 @@ class IFSCloudWebUI:
                 )
 
                 # Perform search with filters
-                results = self.indexer.search(
+                results = self.indexer.search_deduplicated(
                     request.query,
                     limit=request.limit,
                     file_type=getattr(request, "file_type", None),
@@ -286,6 +288,7 @@ class IFSCloudWebUI:
                         line_count=result.line_count,
                         complexity_score=result.complexity_score,
                         modified_time=result.modified_time,
+                        hash=result.hash,
                         module=result.module,
                         logical_unit=result.logical_unit,
                         entity_name=result.entity_name,
@@ -302,14 +305,16 @@ class IFSCloudWebUI:
                     )
                     web_results.append(web_result)
 
-                return JSONResponse(
-                    {
-                        "results": [result.dict() for result in web_results],
-                        "total": len(web_results),
-                        "query": request.query,
-                        "took_ms": 0,  # We could add timing if needed
-                    }
-                )
+                # Use Pydantic's model_dump with mode='json' for proper serialization
+                response_data = {
+                    "results": [
+                        result.model_dump(mode="json") for result in web_results
+                    ],
+                    "total": len(web_results),
+                    "query": request.query,
+                    "took_ms": 0,  # We could add timing if needed
+                }
+                return JSONResponse(response_data)
 
             except Exception as e:
                 logger.error(f"POST Search error: {type(e).__name__}: {e}")
@@ -335,7 +340,7 @@ class IFSCloudWebUI:
                 )
 
                 # Perform search
-                results = self.indexer.search(
+                results = self.indexer.search_deduplicated(
                     request.query,
                     limit=request.limit,
                     file_type=getattr(request, "file_type", None),
@@ -377,11 +382,8 @@ class IFSCloudWebUI:
                         entities=result.entities,
                         line_count=result.line_count,
                         complexity_score=result.complexity_score,
-                        modified_time=(
-                            result.modified_time.isoformat()
-                            if result.modified_time
-                            else None
-                        ),
+                        modified_time=result.modified_time,  # Keep as datetime, Pydantic will handle it
+                        hash=result.hash,
                         module=result.module,
                         logical_unit=result.logical_unit,
                         entity_name=result.entity_name,
@@ -398,13 +400,15 @@ class IFSCloudWebUI:
                     )
                     web_results.append(web_result)
 
-                return JSONResponse(
-                    {
-                        "results": [result.dict() for result in web_results],
-                        "total": len(web_results),
-                        "query": request.query,
-                    }
-                )
+                # Use Pydantic's model_dump with mode='json' for proper serialization
+                response_data = {
+                    "results": [
+                        result.model_dump(mode="json") for result in web_results
+                    ],
+                    "total": len(web_results),
+                    "query": request.query,
+                }
+                return JSONResponse(response_data)
 
             except Exception as e:
                 logger.error(f"POST Search error: {type(e).__name__}: {e}")
@@ -436,7 +440,8 @@ class IFSCloudWebUI:
                     return JSONResponse(
                         {
                             "suggestions": [
-                                s.dict() for s in self._suggestion_cache[cache_key]
+                                s.model_dump(mode="json")
+                                for s in self._suggestion_cache[cache_key]
                             ]
                         }
                     )
@@ -444,7 +449,9 @@ class IFSCloudWebUI:
                 suggestions = await self._generate_suggestions(q, limit)
                 self._suggestion_cache[cache_key] = suggestions
 
-                return JSONResponse({"suggestions": [s.dict() for s in suggestions]})
+                return JSONResponse(
+                    {"suggestions": [s.model_dump(mode="json") for s in suggestions]}
+                )
 
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
@@ -479,7 +486,9 @@ class IFSCloudWebUI:
                 )
                 self._suggestion_cache[cache_key] = suggestions
 
-                return JSONResponse({"suggestions": [s.dict() for s in suggestions]})
+                return JSONResponse(
+                    {"suggestions": [s.model_dump(mode="json") for s in suggestions]}
+                )
 
             except Exception as e:
                 logger.error(f"Suggestions error: {e}")
@@ -563,7 +572,9 @@ class IFSCloudWebUI:
         all_results = []
         for search_query in search_queries:
             try:
-                results = self.indexer.search(search_query, limit=limit * 3)
+                results = self.indexer.search_deduplicated(
+                    search_query, limit=limit * 3
+                )
                 all_results.extend(results)
                 if len(all_results) >= limit * 2:  # Stop early if we have enough
                     break
@@ -573,7 +584,7 @@ class IFSCloudWebUI:
         # If no results from advanced search, try basic search
         if not all_results:
             try:
-                all_results = self.indexer.search(query, limit=limit * 2)
+                all_results = self.indexer.search_deduplicated(query, limit=limit * 2)
             except:
                 pass
 
@@ -734,382 +745,9 @@ class IFSCloudWebUI:
         return highlighted
 
 
-def create_web_ui_files():
-    """Create the HTML template and CSS files for the web UI."""
-
-    # Create templates directory
-    templates_dir = Path("templates")
-    templates_dir.mkdir(exist_ok=True)
-
-    # Create main HTML template
-    html_template = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IFS Cloud Explorer</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
-</head>
-<body class="bg-gray-50">
-    <div x-data="searchApp()" class="container mx-auto px-4 py-8">
-        <!-- Header -->
-        <div class="mb-8">
-            <h1 class="text-4xl font-bold text-gray-900 mb-2">
-                <i class="fas fa-search text-blue-600"></i>
-                IFS Cloud Explorer
-            </h1>
-            <p class="text-gray-600">Intelligent search for IFS Cloud codebases with frontend element discovery</p>
-        </div>
-
-        <!-- Search Section -->
-        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-            <div class="relative">
-                <!-- Search Input -->
-                <div class="relative">
-                    <input 
-                        type="text" 
-                        x-model="query" 
-                        @input="handleInput"
-                        @keydown.enter="search"
-                        @keydown.arrow-down="selectSuggestion(1)"
-                        @keydown.arrow-up="selectSuggestion(-1)"
-                        @keydown.escape="hideSuggestions"
-                        @focus="showSuggestions = true"
-                        placeholder="Search entities, functions, pages, iconsets, trees, navigators..." 
-                        class="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
-                    >
-                    <i class="fas fa-search absolute left-4 top-4 text-gray-400"></i>
-                    <button 
-                        @click="search" 
-                        class="absolute right-2 top-2 bg-blue-600 text-white px-4 py-1 rounded hover:bg-blue-700"
-                    >
-                        Search
-                    </button>
-                </div>
-
-                <!-- Type-ahead Suggestions -->
-                <div 
-                    x-show="showSuggestions && suggestions.length > 0" 
-                    @click.away="hideSuggestions"
-                    class="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-64 overflow-y-auto shadow-lg"
-                >
-                    <template x-for="(suggestion, index) in suggestions" :key="index">
-                        <div 
-                            @click="selectSuggestionText(suggestion.text)"
-                            :class="{'bg-blue-50': selectedSuggestion === index}"
-                            class="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
-                        >
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <span class="font-medium" x-text="suggestion.text"></span>
-                                    <span class="text-sm text-gray-500 ml-2" x-text="suggestion.context"></span>
-                                </div>
-                                <span 
-                                    :class="{
-                                        'bg-blue-100 text-blue-800': suggestion.type === 'entity',
-                                        'bg-green-100 text-green-800': suggestion.type === 'file',
-                                        'bg-purple-100 text-purple-800': suggestion.type === 'module',
-                                        'bg-orange-100 text-orange-800': suggestion.type === 'frontend'
-                                    }"
-                                    class="px-2 py-1 rounded text-xs font-medium"
-                                    x-text="suggestion.type"
-                                ></span>
-                            </div>
-                        </div>
-                    </template>
-                </div>
-            </div>
-
-            <!-- Filters -->
-            <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
-                <select x-model="filters.file_type" class="border border-gray-300 rounded px-3 py-2">
-                    <option value="">All File Types</option>
-                    <option value=".entity">Entity</option>
-                    <option value=".client">Client</option>
-                    <option value=".projection">Projection</option>
-                    <option value=".fragment">Fragment</option>
-                    <option value=".plsql">PL/SQL</option>
-                    <option value=".views">Views</option>
-                    <option value=".storage">Storage</option>
-                </select>
-                
-                <input x-model="filters.module" placeholder="Module filter..." class="border border-gray-300 rounded px-3 py-2">
-                <input x-model="filters.logical_unit" placeholder="Logical Unit filter..." class="border border-gray-300 rounded px-3 py-2">
-                <input x-model="filters.limit" type="number" placeholder="Result limit..." class="border border-gray-300 rounded px-3 py-2" value="20">
-            </div>
-        </div>
-
-        <!-- Stats -->
-        <div x-show="stats" class="bg-white rounded-lg shadow-md p-4 mb-6">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                <div>
-                    <div class="text-2xl font-bold text-blue-600" x-text="stats.total_files"></div>
-                    <div class="text-sm text-gray-600">Files Indexed</div>
-                </div>
-                <div>
-                    <div class="text-2xl font-bold text-green-600" x-text="stats.total_entities"></div>
-                    <div class="text-sm text-gray-600">Entities</div>
-                </div>
-                <div>
-                    <div class="text-2xl font-bold text-purple-600" x-text="stats.supported_extensions?.length || 0"></div>
-                    <div class="text-sm text-gray-600">File Types</div>
-                </div>
-                <div>
-                    <div class="text-2xl font-bold text-orange-600" x-text="results.length"></div>
-                    <div class="text-sm text-gray-600">Results</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Loading -->
-        <div x-show="loading" class="text-center py-8">
-            <i class="fas fa-spinner fa-spin text-3xl text-blue-600"></i>
-            <p class="mt-2 text-gray-600">Searching...</p>
-        </div>
-
-        <!-- Results -->
-        <div x-show="results.length > 0 && !loading" class="space-y-4">
-            <template x-for="result in results" :key="result.path">
-                <div class="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
-                    <!-- File Header -->
-                    <div class="flex items-start justify-between mb-3">
-                        <div>
-                            <h3 class="text-lg font-semibold text-gray-900" x-text="result.name"></h3>
-                            <p class="text-sm text-gray-600" x-text="result.path"></p>
-                        </div>
-                        <div class="flex items-center space-x-2">
-                            <span class="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium" x-text="result.type"></span>
-                            <span class="text-sm text-gray-500">Score: <span x-text="result.score.toFixed(3)"></span></span>
-                        </div>
-                    </div>
-
-                    <!-- Tags -->
-                    <div x-show="result.tags && result.tags.length > 0" class="mb-3">
-                        <template x-for="tag in result.tags" :key="tag">
-                            <span class="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium mr-1 mb-1" x-text="tag"></span>
-                        </template>
-                    </div>
-
-                    <!-- IFS Context -->
-                    <div x-show="result.module || result.logical_unit || result.component" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3 text-sm">
-                        <div x-show="result.module">
-                            <span class="font-medium text-gray-700">Module:</span> 
-                            <span x-text="result.module"></span>
-                        </div>
-                        <div x-show="result.logical_unit">
-                            <span class="font-medium text-gray-700">Logical Unit:</span> 
-                            <span x-text="result.logical_unit"></span>
-                        </div>
-                        <div x-show="result.component">
-                            <span class="font-medium text-gray-700">Component:</span> 
-                            <span x-text="result.component"></span>
-                        </div>
-                    </div>
-
-                    <!-- Frontend Elements -->
-                    <div x-show="result.pages?.length > 0 || result.iconsets?.length > 0 || result.trees?.length > 0 || result.navigators?.length > 0" class="mb-3">
-                        <h4 class="font-medium text-gray-700 mb-2">Frontend Elements:</h4>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                            <div x-show="result.pages?.length > 0">
-                                <span class="font-medium text-blue-600">Pages:</span> 
-                                <span x-text="result.pages.join(', ')"></span>
-                            </div>
-                            <div x-show="result.lists?.length > 0">
-                                <span class="font-medium text-green-600">Lists:</span> 
-                                <span x-text="result.lists.join(', ')"></span>
-                            </div>
-                            <div x-show="result.iconsets?.length > 0">
-                                <span class="font-medium text-purple-600">Iconsets:</span> 
-                                <span x-text="result.iconsets.join(', ')"></span>
-                            </div>
-                            <div x-show="result.trees?.length > 0">
-                                <span class="font-medium text-orange-600">Trees:</span> 
-                                <span x-text="result.trees.join(', ')"></span>
-                            </div>
-                            <div x-show="result.navigators?.length > 0">
-                                <span class="font-medium text-red-600">Navigators:</span> 
-                                <span x-text="result.navigators.join(', ')"></span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Entities -->
-                    <div x-show="result.entities && result.entities.length > 0" class="mb-3">
-                        <span class="font-medium text-gray-700">Entities:</span> 
-                        <span class="text-sm" x-text="result.entities.join(', ')"></span>
-                    </div>
-
-                    <!-- Content Preview -->
-                    <div class="bg-gray-50 rounded p-3">
-                        <pre class="text-sm text-gray-700 whitespace-pre-wrap" x-html="result.highlight || result.content_preview"></pre>
-                    </div>
-
-                    <!-- Metadata -->
-                    <div class="mt-3 flex justify-between text-xs text-gray-500">
-                        <span>Lines: <span x-text="result.line_count"></span></span>
-                        <span>Complexity: <span x-text="result.complexity_score.toFixed(2)"></span></span>
-                        <span>Modified: <span x-text="new Date(result.modified_time).toLocaleDateString()"></span></span>
-                    </div>
-                </div>
-            </template>
-        </div>
-
-        <!-- No Results -->
-        <div x-show="results.length === 0 && searchPerformed && !loading" class="text-center py-8">
-            <i class="fas fa-search text-4xl text-gray-400 mb-4"></i>
-            <h3 class="text-lg font-medium text-gray-900 mb-2">No results found</h3>
-            <p class="text-gray-600">Try adjusting your search terms or filters</p>
-        </div>
-    </div>
-
-    <script>
-        function searchApp() {
-            return {
-                query: '',
-                results: [],
-                suggestions: [],
-                stats: null,
-                loading: false,
-                searchPerformed: false,
-                showSuggestions: false,
-                selectedSuggestion: -1,
-                filters: {
-                    file_type: '',
-                    module: '',
-                    logical_unit: '',
-                    limit: 20
-                },
-
-                async init() {
-                    await this.loadStats();
-                },
-
-                async handleInput() {
-                    if (this.query.length >= 2) {
-                        await this.getSuggestions();
-                        this.showSuggestions = true;
-                    } else {
-                        this.suggestions = [];
-                        this.showSuggestions = false;
-                    }
-                    this.selectedSuggestion = -1;
-                },
-
-                async getSuggestions() {
-                    try {
-                        const response = await fetch('/suggestions', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                                query: this.query,
-                                limit: 8
-                            })
-                        });
-                        
-                        if (response.ok) {
-                            const data = await response.json();
-                            this.suggestions = data.suggestions || [];
-                        } else {
-                            console.warn('Suggestions request failed:', response.status);
-                            this.suggestions = [];
-                        }
-                    } catch (error) {
-                        console.error('Error getting suggestions:', error);
-                        this.suggestions = [];
-                    }
-                },
-
-                selectSuggestion(direction) {
-                    if (this.suggestions.length === 0) return;
-                    
-                    this.selectedSuggestion += direction;
-                    if (this.selectedSuggestion >= this.suggestions.length) {
-                        this.selectedSuggestion = 0;
-                    } else if (this.selectedSuggestion < 0) {
-                        this.selectedSuggestion = this.suggestions.length - 1;
-                    }
-                },
-
-                selectSuggestionText(text) {
-                    this.query = text;
-                    this.hideSuggestions();
-                    this.search();
-                },
-
-                hideSuggestions() {
-                    this.showSuggestions = false;
-                    this.selectedSuggestion = -1;
-                },
-
-                async search() {
-                    if (!this.query.trim()) return;
-
-                    this.loading = true;
-                    this.hideSuggestions();
-
-                    try {
-                        const searchData = {
-                            query: this.query,
-                            limit: this.filters.limit
-                        };
-
-                        // Add filters if specified
-                        if (this.filters.file_type) searchData.file_type = this.filters.file_type;
-                        if (this.filters.module) searchData.module = this.filters.module;
-                        if (this.filters.logical_unit) searchData.logical_unit = this.filters.logical_unit;
-
-                        const response = await fetch('/search', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify(searchData)
-                        });
-
-                        if (response.ok) {
-                            const data = await response.json();
-                            this.results = data.results || [];
-                            this.searchPerformed = true;
-                        } else {
-                            const errorText = await response.text();
-                            console.error('Search failed:', response.status, errorText);
-                            this.results = [];
-                        }
-                    } catch (error) {
-                        console.error('Search error:', error);
-                    } finally {
-                        this.loading = false;
-                    }
-                },
-
-                async loadStats() {
-                    try {
-                        const response = await fetch('/api/stats');
-                        this.stats = await response.json();
-                    } catch (error) {
-                        console.error('Error loading stats:', error);
-                    }
-                }
-            }
-        }
-    </script>
-</body>
-</html>"""
-
-    with open(templates_dir / "index.html", "w", encoding="utf-8") as f:
-        f.write(html_template)
-
-
 # Main application entry point
 if __name__ == "__main__":
     import uvicorn
-
-    # Create web UI files
-    create_web_ui_files()
 
     # Create the web UI application
     web_ui = IFSCloudWebUI()

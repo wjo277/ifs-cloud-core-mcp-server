@@ -43,6 +43,7 @@ class SearchResult(BaseModel):
     line_count: int
     complexity_score: float
     modified_time: datetime
+    hash: str  # Unique content hash for React keys
     module: Optional[str] = None
     logical_unit: Optional[str] = None
     entity_name: Optional[str] = None
@@ -57,9 +58,7 @@ class SearchResult(BaseModel):
     contexts: List[str] = []
 
     class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class IFSCloudTantivyIndexer:
@@ -814,6 +813,56 @@ class IFSCloudTantivyIndexer:
 
         return stats
 
+    def search_deduplicated(
+        self,
+        query: str,
+        limit: int = 10,
+        file_type: Optional[str] = None,
+        min_complexity: Optional[float] = None,
+        max_complexity: Optional[float] = None,
+    ) -> List[SearchResult]:
+        """Search the index with deduplication to avoid duplicate results from multiple search strategies.
+
+        This method wraps the base search method and removes duplicates based on path+hash combination.
+        This is needed because the search method runs multiple strategies (exact, fuzzy, prefix) that
+        can return the same documents.
+
+        Args:
+            query: Search query
+            limit: Maximum number of results
+            file_type: Filter by file type (optional)
+            min_complexity: Minimum complexity score (optional)
+            max_complexity: Maximum complexity score (optional)
+
+        Returns:
+            List of unique search results
+        """
+        # Get raw results from base search method
+        results = self.search(
+            query=query,
+            limit=limit * 3,  # Request more results to account for deduplication
+            file_type=file_type,
+            min_complexity=min_complexity,
+            max_complexity=max_complexity,
+        )
+
+        # Deduplicate results by path+hash combination
+        seen_keys = set()
+        unique_results = []
+        for result in results:
+            key = f"{result.path}-{result.hash}"
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_results.append(result)
+                # Stop when we have enough unique results
+                if len(unique_results) >= limit:
+                    break
+
+        logger.debug(
+            f"Search returned {len(results)} results, {len(unique_results)} unique after deduplication"
+        )
+        return unique_results
+
     def search(
         self,
         query: str,
@@ -989,6 +1038,7 @@ class IFSCloudTantivyIndexer:
                         if doc.get_first("modified_time")
                         else "1970-01-01T00:00:00"
                     ),
+                    hash=doc.get_first("hash") or "",
                     module=doc.get_first("module") or None,
                     logical_unit=doc.get_first("logical_unit") or None,
                     entity_name=doc.get_first("entity_name") or None,
