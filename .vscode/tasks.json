@@ -1,0 +1,98 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Web UI",
+      "type": "shell",
+      "command": "uv",
+      "args": ["run", "python", "-m", "src.ifs_cloud_mcp_server.web_ui"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "new",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "detail": "Start the IFS Cloud MCP Server Web UI on http://localhost:8000"
+    },
+    {
+      "label": "Start MCP Server",
+      "type": "shell",
+      "command": "uv",
+      "args": ["run", "python", "-m", "src.ifs_cloud_mcp_server.main"],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "new",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "detail": "Start the IFS Cloud MCP Server"
+    },
+    {
+      "label": "Run Tests",
+      "type": "shell",
+      "command": "uv",
+      "args": ["run", "python", "-m", "pytest", "tests/"],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": true
+      },
+      "problemMatcher": [],
+      "detail": "Run all tests using pytest"
+    },
+    {
+      "label": "Index Directory",
+      "type": "shell",
+      "command": "uv",
+      "args": ["run", "python", "index_script.py", "${input:directoryPath}"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": true
+      },
+      "problemMatcher": [],
+      "detail": "Index a directory of IFS Cloud files"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "directoryPath",
+      "description": "Path to directory to index",
+      "default": "test_files",
+      "type": "promptString"
+    }
+  ]
+}
