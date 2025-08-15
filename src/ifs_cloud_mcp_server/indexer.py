@@ -292,24 +292,91 @@ class IFSCloudTantivyIndexer:
             # Get cache stats
             cache_files = len(self._file_cache.get("files", {}))
 
-            # Count entities by doing a wildcard search
+            # Get all documents by searching for documents that have a path field (which all should have)
             try:
-                all_results = self.search("*", limit=10000)
-                total_entities = sum(len(result.entities) for result in all_results)
+                # Use a term query that will match all documents by searching for any path value
+                all_query = tantivy.Query.all_query()
+                all_docs = searcher.search(all_query, limit=total_docs or 10000)
 
-                # Count by file type
+                total_entities = 0
                 file_types = {}
                 modules = set()
                 logical_units = set()
+                all_results = []
 
-                for result in all_results:
-                    file_type = result.type
-                    file_types[file_type] = file_types.get(file_type, 0) + 1
+                for _score, doc_address in all_docs.hits:
+                    try:
+                        doc = searcher.doc(doc_address)
 
-                    if result.module:
-                        modules.add(result.module)
-                    if result.logical_unit:
-                        logical_units.add(result.logical_unit)
+                        # Debug: log the actual document type and structure
+                        logger.debug(
+                            f"Document type: {type(doc)}, doc: {str(doc)[:100]}..."
+                        )
+
+                        # Ensure doc is a proper document object
+                        if not hasattr(doc, "get_first"):
+                            logger.warning(
+                                f"Document at address {doc_address} is not a proper Tantivy document: {type(doc)}"
+                            )
+                            logger.warning(f"Document content: {str(doc)[:200]}...")
+                            continue
+
+                        # Create a SearchResult-like object with safe field access
+                        path = doc.get_first("path")
+                        if not path:
+                            logger.debug(
+                                f"Document at address {doc_address} has no path field"
+                            )
+                            continue  # Skip documents without path
+
+                        name = doc.get_first("name") or ""
+                        type_val = doc.get_first("type") or ""
+                        module_val = doc.get_first("module") or ""
+                        logical_unit_val = doc.get_first("logical_unit") or ""
+                        entities = doc.get_first("entities")
+                        entities_list = entities.split() if entities else []
+
+                        # Get additional fields with safe defaults
+                        complexity_score = float(
+                            doc.get_first("complexity_score") or 0.0
+                        )
+                        pagerank_score = float(doc.get_first("pagerank_score") or 0.0)
+
+                    except Exception as doc_error:
+                        logger.error(
+                            f"Error processing document at address {doc_address}: {doc_error}"
+                        )
+                        logger.error(
+                            f"Document type: {type(doc) if 'doc' in locals() else 'Not retrieved'}"
+                        )
+                        continue
+
+                    # Count entities
+                    total_entities += len(entities_list)
+
+                    # Count by file type
+                    if type_val:
+                        file_types[type_val] = file_types.get(type_val, 0) + 1
+
+                    # Add to modules and logical units sets
+                    if module_val:
+                        modules.add(module_val)
+                    if logical_unit_val:
+                        logical_units.add(logical_unit_val)
+
+                    # Create a minimal SearchResult for ranking calculations
+                    from types import SimpleNamespace
+
+                    result = SimpleNamespace()
+                    result.path = path
+                    result.name = name
+                    result.type = type_val
+                    result.module = module_val
+                    result.logical_unit = logical_unit_val
+                    result.entities = entities_list
+                    result.complexity_score = complexity_score
+                    result.pagerank_score = pagerank_score
+                    all_results.append(result)
 
                 # Calculate logical unit and module rankings
                 lu_rankings = self._calculate_logical_unit_rankings(all_results)
@@ -326,7 +393,8 @@ class IFSCloudTantivyIndexer:
                     reverse=True,
                 )
 
-            except Exception:
+            except Exception as e:
+                logger.error(f"Error processing documents for stats: {e}")
                 # Fallback if search fails
                 total_entities = 0
                 file_types = {}

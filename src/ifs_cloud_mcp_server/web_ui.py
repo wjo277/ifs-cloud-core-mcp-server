@@ -623,9 +623,7 @@ class IFSCloudWebUI:
             searcher = self.indexer._index.searcher()
 
             # Search for the specific file
-            query = tantivy.Query.term_query(
-                self.indexer._index.schema().get_field("path"), file_path
-            )
+            query = tantivy.Query.term_query(self.indexer._schema, "path", file_path)
             results = searcher.search(query, limit=1)
 
             if results.hits:

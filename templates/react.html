@@ -29,6 +29,8 @@
       rel="stylesheet"
       href="https://unpkg.com/codemirror@5.65.16/addon/dialog/dialog.css"
     />
+    <!-- IFS Cloud Marble Dark Theme -->
+    <link rel="stylesheet" href="/static/css/codemirror-marble-dark.css" />
 
     <!-- React -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -45,6 +47,8 @@
     <script src="https://unpkg.com/codemirror@5.65.16/addon/search/searchcursor.js"></script>
     <script src="https://unpkg.com/codemirror@5.65.16/addon/search/search.js"></script>
     <script src="https://unpkg.com/codemirror@5.65.16/addon/dialog/dialog.js"></script>
+    <!-- IFS Cloud Marble Language Mode -->
+    <script src="/static/js/codemirror-marble-mode.js"></script>
   </head>
   <body class="bg-gray-50">
     <div id="root"></div>
@@ -177,8 +181,10 @@
             const extension = filePath?.split('.').pop()?.toLowerCase();
             switch (extension) {
               case 'js': case 'jsx': return 'javascript';
-              case 'sql': case 'plsql': return 'sql';
-              case 'xml': case 'html': case 'entity': case 'projection': case 'fragment': case 'client': case 'views': case 'storage': return 'xml';
+              case 'sql': case 'views': case 'storage': return 'sql';
+              case 'plsql': return 'text/x-plsql';
+              case 'client': case 'fragment': case 'projection': return 'marble';
+              case 'xml': case 'html': case 'entity': return 'xml';
               case 'css': return 'css';
               case 'java': case 'c': case 'cpp': case 'h': return 'clike';
               default: return 'text/plain';
@@ -187,34 +193,58 @@
 
           useEffect(() => {
             if (editorRef.current && !codeMirrorRef.current) {
-              // Initialize CodeMirror
-              codeMirrorRef.current = CodeMirror(editorRef.current, {
-                value: content || '',
-                mode: getMode(filePath),
-                theme: 'default',
-                lineNumbers: true,
-                readOnly: true,
-                lineWrapping: true,
-                matchBrackets: true,
-                autoCloseBrackets: true,
-                foldGutter: true,
-                gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
-                viewportMargin: Infinity,
-                extraKeys: {
-                  "Ctrl-F": "findPersistent",
-                  "Cmd-F": "findPersistent"
-                }
-              });
+              try {
+                // Initialize CodeMirror
+                codeMirrorRef.current = CodeMirror(editorRef.current, {
+                  value: content || '',
+                  mode: getMode(filePath),
+                  theme: 'marble-dark',
+                  lineNumbers: true,
+                  readOnly: true,
+                  lineWrapping: true,
+                  matchBrackets: true,
+                  autoCloseBrackets: true,
+                  foldGutter: true,
+                  gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+                  viewportMargin: 50, // Changed from Infinity to improve scrolling
+                  extraKeys: {
+                    "Ctrl-F": "findPersistent",
+                    "Cmd-F": "findPersistent"
+                  }
+                });
 
-              // Style the editor
-              codeMirrorRef.current.setSize("100%", "100%");
+                // Set proper size with scrolling - calculate 60% of viewport height minus header/footer
+                const viewportHeight = window.innerHeight;
+                const maxEditorHeight = Math.floor(viewportHeight * 0.6 * 0.7); // 60vh modal * 70% for editor
+                codeMirrorRef.current.setSize("100%", `${maxEditorHeight}px`);
+
+                // Force refresh to ensure proper sizing
+                setTimeout(() => {
+                  if (codeMirrorRef.current && typeof codeMirrorRef.current.refresh === 'function') {
+                    codeMirrorRef.current.refresh();
+                    codeMirrorRef.current.scrollTo(0, 0);
+                  }
+                }, 50);
+              } catch (error) {
+                console.error('Error initializing CodeMirror:', error);
+              }
             }
 
             // Update content when it changes
-            if (codeMirrorRef.current && content !== undefined) {
-              const currentValue = codeMirrorRef.current.getValue();
-              if (currentValue !== content) {
-                codeMirrorRef.current.setValue(content || '');
+            if (codeMirrorRef.current && content !== undefined && typeof codeMirrorRef.current.getValue === 'function') {
+              try {
+                const currentValue = codeMirrorRef.current.getValue();
+                if (currentValue !== content) {
+                  codeMirrorRef.current.setValue(content || '');
+                  // Force refresh to ensure proper sizing and scrollbars
+                  setTimeout(() => {
+                    if (codeMirrorRef.current && typeof codeMirrorRef.current.refresh === 'function') {
+                      codeMirrorRef.current.refresh();
+                    }
+                  }, 10);
+                }
+              } catch (error) {
+                console.error('Error updating CodeMirror content:', error);
               }
             }
           }, [content, filePath]);
@@ -222,16 +252,28 @@
           // Cleanup on unmount
           useEffect(() => {
             return () => {
-              if (codeMirrorRef.current) {
-                codeMirrorRef.current.toTextArea();
+              if (codeMirrorRef.current && typeof codeMirrorRef.current.toTextArea === 'function') {
+                try {
+                  codeMirrorRef.current.toTextArea();
+                } catch (error) {
+                  console.warn('Error cleaning up CodeMirror:', error);
+                }
                 codeMirrorRef.current = null;
               }
             };
           }, []);
 
           return (
-            <div className="h-full flex flex-col">
-              <div ref={editorRef} className="flex-1 h-full overflow-hidden" />
+            <div className="h-full flex flex-col overflow-hidden">
+              <div
+                ref={editorRef}
+                className="flex-1 overflow-hidden"
+                style={{
+                  height: '100%',
+                  maxHeight: '100%',
+                  minHeight: 0
+                }}
+              />
             </div>
           );
         }
@@ -1033,7 +1075,7 @@
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                   <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] flex flex-col">
                     {/* Modal Header */}
-                    <div className="flex items-center justify-between p-4 border-b">
+                    <div className="flex items-center justify-between p-4 border-b flex-shrink-0">
                       <div className="flex-1">
                         <h2 className="text-lg font-semibold text-gray-900 truncate">
                           {fileViewerState.filename}
@@ -1065,7 +1107,7 @@
                     </div>
 
                     {/* Modal Body */}
-                    <div className="flex-1 overflow-hidden">
+                    <div className="flex-1 overflow-hidden" style={{ minHeight: 0 }}>
                       {fileViewerState.loading ? (
                         <div className="flex items-center justify-center h-full">
                           <div className="text-center">
@@ -1083,7 +1125,7 @@
                           </div>
                         </div>
                       ) : (
-                        <div className="h-full">
+                        <div className="h-full overflow-hidden" style={{ maxHeight: '100%' }}>
                           <CodeViewer
                             content={fileViewerState.content}
                             filePath={fileViewerState.filePath}
@@ -1094,7 +1136,7 @@
                     </div>
 
                     {/* Modal Footer */}
-                    <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
+                    <div className="p-4 border-t bg-gray-50 flex justify-between items-center flex-shrink-0">
                       <div className="text-xs text-gray-500">
                         {fileViewerState.hasSearchHighlights && (
                           <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded mr-2">
