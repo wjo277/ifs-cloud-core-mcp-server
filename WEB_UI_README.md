@@ -38,17 +38,16 @@ A modern, responsive web interface for exploring IFS Cloud codebases with intell
 
 ```bash
 # Start with default settings
-uv run python -m src.ifs_cloud_mcp_server.launcher web
+uv run python src/ifs_cloud_mcp_server/web_ui.py
 
-# Custom port and index path
-uv run python -m src.ifs_cloud_mcp_server.launcher web --port 8080 --index-path ./my_index
+# The web UI will automatically find an available port in the 5700-5799 range
 ```
 
 ### 2. Index Your IFS Cloud Project
 
 ```bash
 # Build index for your IFS Cloud codebase
-uv run python -m src.ifs_cloud_mcp_server.launcher index build --directory /path/to/your/ifs/project
+uv run python -m src.ifs_cloud_mcp_server.main index --directory /path/to/your/ifs/project
 ```
 
 ### 3. Open Your Browser
@@ -166,7 +165,8 @@ The web UI is built with:
 ### Run in Development Mode
 
 ```bash
-uv run python -m src.ifs_cloud_mcp_server.launcher web --reload --port 8080
+# For development, you can modify web_ui.py to enable reload mode
+uv run python src/ifs_cloud_mcp_server/web_ui.py
 ```
 
 ### Custom Styling
@@ -187,13 +187,13 @@ Add new endpoints in `src/ifs_cloud_mcp_server/web_ui.py` by adding routes to th
 
 **No search results found:**
 
-- Ensure index is built: `uv run python -m src.ifs_cloud_mcp_server.launcher index build --directory /path/to/project`
-- Check index stats: `uv run python -m src.ifs_cloud_mcp_server.launcher index stats`
+- Ensure index is built: `uv run python -m src.ifs_cloud_mcp_server.main index --directory /path/to/project`
+- Check if the index directory exists and contains files
 
 **Port already in use:**
 
-- Use a different port: `--port 8080`
-- Or stop the conflicting service
+- The web UI automatically finds an available port in the 5700-5799 range
+- Check the startup message for the actual port being used
 
 **Slow search performance:**
 
@@ -206,5 +206,5 @@ Start with debug logging to troubleshoot issues:
 
 ```bash
 export LOG_LEVEL=DEBUG
-uv run python -m src.ifs_cloud_mcp_server.launcher web
+uv run python src/ifs_cloud_mcp_server/web_ui.py
 ```

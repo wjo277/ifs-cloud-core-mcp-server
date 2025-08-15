@@ -7,6 +7,7 @@ Provides a Meilisearch-like interface for exploring IFS Cloud codebases.
 import asyncio
 import json
 import logging
+import socket
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -745,6 +746,30 @@ class IFSCloudWebUI:
         return highlighted
 
 
+def find_available_port(start_port: int = 5700, max_port: int = 5799) -> int:
+    """Find the first available port in the specified range.
+
+    Args:
+        start_port: Starting port number (default: 5700)
+        max_port: Maximum port number to try (default: 5799)
+
+    Returns:
+        First available port number
+
+    Raises:
+        RuntimeError: If no available port is found in the range
+    """
+    for port in range(start_port, max_port + 1):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(("localhost", port))
+                return port
+        except OSError:
+            continue
+
+    raise RuntimeError(f"No available port found in range {start_port}-{max_port}")
+
+
 # Main application entry point
 if __name__ == "__main__":
     import uvicorn
@@ -752,14 +777,24 @@ if __name__ == "__main__":
     # Create the web UI application
     web_ui = IFSCloudWebUI()
 
-    print("🚀 Starting IFS Cloud Web UI...")
-    print("📊 Interface will be available at: http://localhost:8000")
-    print("🔍 Features:")
-    print("  • Type-ahead search with intelligent suggestions")
-    print("  • Frontend element discovery (pages, iconsets, trees, navigators)")
-    print("  • Module-aware search and filtering")
-    print("  • Real-time search with highlighting")
-    print("  • Responsive design with modern UI")
+    # Find an available port in the 8000 series
+    try:
+        port = find_available_port()
+        print("🚀 Starting IFS Cloud Web UI...")
+        print(f"📊 Interface will be available at: http://localhost:{port}")
+        print("🔍 Features:")
+        print("  • Type-ahead search with intelligent suggestions")
+        print("  • Frontend element discovery (pages, iconsets, trees, navigators)")
+        print("  • Module-aware search and filtering")
+        print("  • Real-time search with highlighting")
+        print("  • Responsive design with modern UI")
 
-    # Start the server
-    uvicorn.run(web_ui.app, host="0.0.0.0", port=8000, reload=False)
+        # Start the server
+        uvicorn.run(web_ui.app, host="0.0.0.0", port=port, reload=False)
+
+    except RuntimeError as e:
+        print(f"❌ Failed to start web UI: {e}")
+        print(
+            "💡 Please ensure ports 5700-5799 are available or close other applications using these ports."
+        )
+        exit(1)

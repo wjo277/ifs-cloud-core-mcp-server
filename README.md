@@ -90,17 +90,17 @@ cd ifs-cloud-core-mcp-server
 uv sync
 
 # Start web UI
-uv run python -m src.ifs_cloud_mcp_server.launcher web
+uv run python src/ifs_cloud_mcp_server/web_ui.py
 ```
 
 2. **Index your IFS Cloud project:**
 
 ```bash
 # Build search index
-uv run python -m src.ifs_cloud_mcp_server.launcher index build --directory /path/to/your/ifs/project
+uv run python -m src.ifs_cloud_mcp_server.main index --directory /path/to/your/ifs/project
 ```
 
-3. **Open browser:** Navigate to `http://localhost:8000` and start exploring!
+3. **Open browser:** Navigate to `http://localhost:5700` (or the port shown in the startup message) and start exploring!
 
 ### 🔌 **MCP Server Mode** (For AI integration)
 
