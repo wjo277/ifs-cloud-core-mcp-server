@@ -3937,7 +3937,7 @@ selector {fragment_name}Selector {{
         return "\n".join(lines)
 
     def run(self, transport_type: str = "stdio", **kwargs):
-        """Run the MCP server (synchronous version for FastMCP).
+        """Run the MCP server.
 
         Args:
             transport_type: Transport type ("stdio", "sse", etc.)

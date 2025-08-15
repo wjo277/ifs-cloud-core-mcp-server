@@ -333,11 +333,12 @@ def handle_server_command(args) -> int:
         # Create index directory if it doesn't exist
         index_path.mkdir(parents=True, exist_ok=True)
 
-        # Create and run server
+        # Create server
         server = IFSCloudMCPServer(
             index_path=index_path, name=getattr(args, "name", "ifs-cloud-mcp-server")
         )
 
+        # Try to run the server, handling asyncio context issues
         server.run(transport_type=getattr(args, "transport", "stdio"))
 
     except ValueError as e:
@@ -345,6 +346,15 @@ def handle_server_command(args) -> int:
         return 1
     except KeyboardInterrupt:
         logging.info("Received interrupt signal, shutting down...")
+    except RuntimeError as e:
+        if "Already running asyncio in this thread" in str(e):
+            logging.error("❌ AsyncIO conflict detected")
+            logging.error("This server must be run as a standalone process")
+            logging.error("Please ensure no other asyncio event loop is running")
+            return 1
+        else:
+            logging.error(f"Runtime error: {e}")
+            return 1
     except Exception as e:
         logging.error(f"Server error: {e}")
         return 1
@@ -358,6 +368,34 @@ def handle_server_command(args) -> int:
 def main_sync():
     """Synchronous main entry point for console scripts."""
     import argparse
+
+    # Check if we're being called in an asyncio context
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+        # If we get here, we're in an asyncio context
+        print(
+            "❌ Error: IFS Cloud MCP Server cannot be run from within an asyncio context.",
+            file=sys.stderr,
+        )
+        print("", file=sys.stderr)
+        print("This typically happens when:", file=sys.stderr)
+        print("  1. Running from a Jupyter notebook or IPython", file=sys.stderr)
+        print("  2. Being called from within an async function", file=sys.stderr)
+        print("  3. Called by an MCP client that uses asyncio", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Solutions:", file=sys.stderr)
+        print("  1. Run from a regular command line terminal", file=sys.stderr)
+        print("  2. Use the standalone wrapper script", file=sys.stderr)
+        print(
+            "  3. Ensure your MCP client runs the server as a subprocess",
+            file=sys.stderr,
+        )
+        return 1
+    except RuntimeError:
+        # No event loop, we're good to proceed
+        pass
 
     # Parse arguments first to determine which command to run
     parser = argparse.ArgumentParser(
