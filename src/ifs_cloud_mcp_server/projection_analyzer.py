@@ -58,6 +58,7 @@ class NodeType(Enum):
     ARRAY = "array"
     ACTION = "action"
     FUNCTION = "function"
+    QUERY = "query"
     COMMAND = "command"
     LUDEPENDENCY = "ludependency"
     ENTITYSET = "entityset"
@@ -269,6 +270,7 @@ class ProjectionAnalyzer:
             "array": re.compile(r"^array\s+(\w+)"),
             "action": re.compile(r"^action\s+(\w+)"),
             "function": re.compile(r"^function\s+(\w+)"),
+            "query": re.compile(r"^query\s+(\w+)"),
             "entityset": re.compile(r"^entityset\s+(\w+)\s+for\s+(\w+)"),
             "component": re.compile(r"^component\s+(\w+)"),
             "layer": re.compile(r"^layer\s+(\w+)"),
@@ -364,6 +366,7 @@ class ProjectionAnalyzer:
         self._safe_parse(ast, self._parse_entities)
         self._safe_parse(ast, self._parse_actions)
         self._safe_parse(ast, self._parse_functions)
+        self._safe_parse(ast, self._parse_queries)
 
         # Post-processing validations
         self._validate_structure(ast)
@@ -373,7 +376,9 @@ class ProjectionAnalyzer:
     def _validate_structure(self, ast: ProjectionAST):
         """Validate the overall structure and relationships - conservatively"""
         # Only flag missing components if there's substantial content
-        if not ast.component and (ast.entitysets or ast.entities or ast.actions):
+        if not ast.component and (
+            ast.entitysets or ast.entities or ast.actions or ast.queries
+        ):
             ast.add_hint(
                 "Component declaration might be missing",
                 1,
@@ -381,7 +386,9 @@ class ProjectionAnalyzer:
                 fix_suggestion="Consider adding 'component <COMPONENT_NAME>;' after projection declaration",
             )
 
-        if not ast.layer and (ast.entitysets or ast.entities or ast.actions):
+        if not ast.layer and (
+            ast.entitysets or ast.entities or ast.actions or ast.queries
+        ):
             ast.add_hint(
                 "Layer declaration might be missing",
                 1,
@@ -755,6 +762,105 @@ class ProjectionAnalyzer:
                             break
 
                     ast.functions.append(function)
+
+    def _parse_queries(self, ast: ProjectionAST):
+        """Parse query definitions with conservative error handling"""
+        for i, line in enumerate(self.lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            # Match query declarations
+            query_match = self.patterns["query"].match(stripped)
+            if query_match:
+                query_name = query_match.group(1)
+
+                # Create query node
+                query = {
+                    "node_type": NodeType.QUERY,
+                    "name": query_name,
+                    "start_line": i + 1,
+                    "end_line": i + 1,
+                    "properties": {
+                        "name": query_name,
+                    },
+                    "children": [],
+                    "from": None,
+                    "lu": None,
+                    "keys": [],
+                    "attributes": [],
+                    "arrays": [],
+                    "actions": [],
+                }
+
+                # Parse query body - look for opening brace
+                j = i + 1
+                brace_count = 0
+                found_opening_brace = False
+
+                while j < len(self.lines):
+                    body_line = self.lines[j].strip()
+
+                    if "{" in body_line:
+                        found_opening_brace = True
+                        brace_count += body_line.count("{")
+                        brace_count -= body_line.count("}")
+                    elif found_opening_brace and "}" in body_line:
+                        brace_count -= body_line.count("}")
+                        brace_count += body_line.count("{")
+
+                    if found_opening_brace:
+                        # Parse query properties
+                        if body_line.startswith("from ="):
+                            from_match = re.search(r'from\s*=\s*"([^"]*)"', body_line)
+                            if from_match:
+                                query["from"] = from_match.group(1)
+                                query["properties"]["from"] = from_match.group(1)
+
+                        elif body_line.startswith("lu ="):
+                            lu_match = re.search(r"lu\s*=\s*(\w+)", body_line)
+                            if lu_match:
+                                query["lu"] = lu_match.group(1)
+                                query["properties"]["lu"] = lu_match.group(1)
+
+                        elif body_line.startswith("keys ="):
+                            keys_match = re.search(r"keys\s*=\s*([^;]+)", body_line)
+                            if keys_match:
+                                keys_str = keys_match.group(1).strip()
+                                query["keys"] = [k.strip() for k in keys_str.split(",")]
+                                query["properties"]["keys"] = query["keys"]
+
+                        # Parse attributes, arrays, actions within query
+                        elif body_line.startswith("attribute "):
+                            attr_match = re.match(
+                                r"attribute\s+(\w+)\s+(\w+)", body_line
+                            )
+                            if attr_match:
+                                query["attributes"].append(
+                                    {
+                                        "name": attr_match.group(1),
+                                        "type": attr_match.group(2),
+                                    }
+                                )
+
+                        elif body_line.startswith("array "):
+                            array_match = re.match(r"array\s+(\w+)", body_line)
+                            if array_match:
+                                query["arrays"].append({"name": array_match.group(1)})
+
+                        elif body_line.startswith("action "):
+                            action_match = re.match(r"action\s+(\w+)", body_line)
+                            if action_match:
+                                query["actions"].append({"name": action_match.group(1)})
+
+                    j += 1
+                    query["end_line"] = j
+
+                    # Stop when we've closed all braces
+                    if found_opening_brace and brace_count <= 0:
+                        break
+
+                ast.queries.append(query)
 
     def _parse_projection_header(self) -> Dict[str, Any]:
         """Parse projection header to determine type and name"""

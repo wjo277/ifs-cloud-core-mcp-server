@@ -171,13 +171,19 @@ class ConservativeClientAnalyzer:
             "history_separator": r"^\s*-{20,}",
         }
 
-    def analyze(self, content: str, filename: str = "client.client") -> dict:
+    def analyze(
+        self,
+        content: str,
+        filename: str = "client.client",
+        skip_header_validation: bool = False,
+    ) -> dict:
         """
         Analyze client file content with conservative approach.
 
         Args:
             content: Client file content
             filename: Name of the file being analyzed
+            skip_header_validation: Skip client/component header validation (used within fragments)
 
         Returns:
             Analysis results with AST and diagnostics
@@ -190,7 +196,7 @@ class ConservativeClientAnalyzer:
             self.ast_root = self._parse_client_structure(lines)
 
             # Conservative validation - only check obvious issues
-            self._validate_basic_structure(lines)
+            self._validate_basic_structure(lines, skip_header_validation)
             self._validate_syntax_patterns(lines)
 
             return {
@@ -369,7 +375,9 @@ class ConservativeClientAnalyzer:
 
         return root
 
-    def _validate_basic_structure(self, lines: List[str]):
+    def _validate_basic_structure(
+        self, lines: List[str], skip_header_validation: bool = False
+    ):
         """Validate basic client structure with conservative approach"""
         has_client_declaration = False
         has_component_declaration = False
@@ -389,25 +397,27 @@ class ConservativeClientAnalyzer:
                 has_projection_declaration = True
 
         # Conservative validation - only error on clearly missing essential elements
-        if not has_client_declaration:
-            self._add_diagnostic(
-                0,
-                0,
-                0,
-                0,
-                "Client file should have a client declaration (e.g., 'client ClientName;')",
-                DiagnosticSeverity.WARNING,
-            )
+        # Skip header validation when used within fragments
+        if not skip_header_validation:
+            if not has_client_declaration:
+                self._add_diagnostic(
+                    0,
+                    0,
+                    0,
+                    0,
+                    "Client file should have a client declaration (e.g., 'client ClientName;')",
+                    DiagnosticSeverity.WARNING,
+                )
 
-        if not has_component_declaration:
-            self._add_diagnostic(
-                0,
-                0,
-                0,
-                0,
-                "Client file should have a component declaration (e.g., 'component ORDER;')",
-                DiagnosticSeverity.WARNING,
-            )
+            if not has_component_declaration:
+                self._add_diagnostic(
+                    0,
+                    0,
+                    0,
+                    0,
+                    "Client file should have a component declaration (e.g., 'component ORDER;')",
+                    DiagnosticSeverity.WARNING,
+                )
 
     def _validate_syntax_patterns(self, lines: List[str]):
         """Validate syntax patterns with conservative approach"""
