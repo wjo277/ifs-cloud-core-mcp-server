@@ -216,18 +216,23 @@ function Copy-FilesWithStructure {
       Copy-Item -Path $File.FullName -Destination $DestinationPath -Force
       $CopiedCount++
 
-      # Show progress every 10 files
-      if ($CopiedCount % 10 -eq 0) {
-        Write-Host "`rCopied $CopiedCount files..." -ForegroundColor Cyan -NoNewline
+      # Show progress every 10 files or every 1000 after 10k files
+      $progressInterval = if ($CopiedCount -gt 10000) { 1000 } else { 10 }
+      if ($CopiedCount % $progressInterval -eq 0 -or $CopiedCount -eq $FilesToCopy.Count) {
+        $percentComplete = [math]::Round(($CopiedCount / $FilesToCopy.Count) * 100, 1)
+        Write-Progress -Activity "Copying IFS Cloud Core files" -Status "Copied $CopiedCount of $($FilesToCopy.Count) files ($percentComplete%)" -PercentComplete $percentComplete
       }
     }
     catch {
-      Write-Host "`n`nError copying file '$($File.FullName)': $($_.Exception.Message)" -ForegroundColor Red
+      Write-Host "`nError copying file '$($File.FullName)': $($_.Exception.Message)" -ForegroundColor Red
       $ErrorCount++
     }
   }
 
-  Write-Host "`n`nCopy operation completed!" -ForegroundColor Green
+  # Clear the progress bar
+  Write-Progress -Activity "Copying IFS Cloud Core files" -Completed
+
+  Write-Host "`nCopy operation completed!" -ForegroundColor Green
   Write-Host "Successfully copied: $CopiedCount files" -ForegroundColor Green
   if ($ErrorCount -gt 0) {
     Write-Host "Errors encountered: $ErrorCount files" -ForegroundColor Red
