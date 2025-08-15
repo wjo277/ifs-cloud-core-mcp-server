@@ -158,7 +158,7 @@ def extract_ifs_cloud_zip(zip_path: Path, version: str) -> Path:
     return extract_dir
 
 
-def build_index_for_extract(extract_path: Path, index_path: Path) -> bool:
+async def build_index_for_extract(extract_path: Path, index_path: Path) -> bool:
     """Build search index for extracted IFS Cloud files.
 
     Args:
@@ -177,9 +177,7 @@ def build_index_for_extract(extract_path: Path, index_path: Path) -> bool:
         indexer = IFSCloudTantivyIndexer(index_path=index_path)
 
         # Build index
-        import asyncio
-
-        stats = asyncio.run(indexer.index_directory(str(extract_path)))
+        stats = await indexer.index_directory(str(extract_path))
 
         logging.info(f"Index built successfully:")
         logging.info(f"  Files indexed: {stats.get('indexed', 0)}")
@@ -343,7 +341,7 @@ async def handle_import_command(args) -> int:
 
         # Build index
         index_path.mkdir(parents=True, exist_ok=True)
-        success = build_index_for_extract(extract_path, index_path)
+        success = await build_index_for_extract(extract_path, index_path)
 
         if success:
             logging.info(f"✅ Import completed successfully!")
