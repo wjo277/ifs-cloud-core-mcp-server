@@ -9,6 +9,10 @@ from fastmcp import FastMCP
 
 from .indexer import IFSCloudTantivyIndexer, SearchResult
 from .config import ConfigManager
+from .plsql_analyzer import ConservativePLSQLAnalyzer
+from .client_analyzer import ConservativeClientAnalyzer
+from .projection_analyzer import ProjectionAnalyzer
+from .fragment_analyzer import ConservativeFragmentAnalyzer
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +34,12 @@ class IFSCloudMCPServer:
         self.mcp = FastMCP(name)
         self.indexer = IFSCloudTantivyIndexer(index_path)
         self.config_manager = ConfigManager()
+
+        # Initialize analyzers for comprehensive code understanding
+        self.plsql_analyzer = ConservativePLSQLAnalyzer(strict_mode=False)
+        self.client_analyzer = ConservativeClientAnalyzer()
+        self.projection_analyzer = ProjectionAnalyzer(strict_mode=False)
+        self.fragment_analyzer = ConservativeFragmentAnalyzer()
 
         # Register tools
         self._register_tools()
@@ -3168,6 +3178,414 @@ selector {fragment_name}Selector {{
 -- ============================================================================="""
 
             return f"Generated IFS Cloud Fragment Template:\\n\\n**Fragment:** {fragment_name}\\n**Type:** {fragment_type.title()}\\n**Target Entity:** {target_entity if target_entity else 'N/A'}\\n\\n```fragment\\n{template}\\n```\\n\\n**Implementation Notes:**\\n1. Save as {fragment_name}.fragment\\n2. Define clear parameters for reusability\\n3. Test fragment in multiple client contexts\\n4. Ensure proper data binding and validation\\n5. Add appropriate security and permission checks\\n6. Document fragment usage and integration points"
+
+        @self.mcp.tool()
+        async def analyze_plsql_file(content: str, strict_mode: bool = False) -> str:
+            """Analyze IFS Cloud PLSQL file for business logic understanding.
+
+            **AGENT INSTRUCTIONS:**
+            Use this tool to deeply understand PLSQL business logic files (.plsql).
+
+            **Perfect for:**
+            - Understanding business validation patterns
+            - Extracting public API methods and signatures
+            - Finding error handling and exception patterns
+            - Analyzing procedure/function organization
+            - Understanding IFS Cloud architectural patterns
+
+            **What you'll get:**
+            - Complete AST structure of the PLSQL file
+            - Public vs private method analysis
+            - Business validation patterns and rules
+            - Error handling mechanisms
+            - Constants and type definitions
+            - Logical unit and component information
+            - Method signatures and parameters
+
+            Args:
+                content: PLSQL file content to analyze
+                strict_mode: If True, applies stricter validation (default: False)
+
+            Returns:
+                Comprehensive analysis of PLSQL structure and business logic
+            """
+            try:
+                result = self.plsql_analyzer.analyze(content)
+
+                lines = []
+                lines.append("🔍 **PLSQL Business Logic Analysis**")
+                lines.append("=" * 50)
+                lines.append("")
+
+                # Basic validity
+                lines.append(
+                    f"✅ **Analysis Result:** {'Valid' if result.is_valid else 'Issues Found'}"
+                )
+                lines.append(f"🔍 **Errors:** {len(result.get_errors())}")
+                lines.append(f"⚠️ **Warnings:** {len(result.get_warnings())}")
+                lines.append("")
+
+                # IFS Cloud metadata
+                lines.append("🏗️ **IFS Cloud Structure:**")
+                lines.append(
+                    f"  • Logical Unit: {result.logical_unit or 'Not specified'}"
+                )
+                lines.append(f"  • Component: {result.component or 'Not specified'}")
+                lines.append(f"  • Layer: {result.layer or 'Not specified'}")
+                lines.append("")
+
+                # Architecture overview
+                lines.append("📊 **Architecture Overview:**")
+                lines.append(f"  • Public Methods: {len(result.public_methods)}")
+                lines.append(f"  • Private Methods: {len(result.private_methods)}")
+                lines.append(f"  • Constants: {len(result.constants)}")
+                lines.append(f"  • Type Definitions: {len(result.types)}")
+                lines.append("")
+
+                # Business logic analysis
+                lines.append("🛡️ **Business Logic Analysis:**")
+                lines.append(
+                    f"  • Business Validations: {len(result.business_validations)}"
+                )
+                lines.append(f"  • Error Patterns: {len(result.error_patterns)}")
+                lines.append("")
+
+                # Public API
+                if result.public_methods:
+                    lines.append("🌟 **Public API Methods:**")
+                    for method in result.public_methods[:10]:
+                        lines.append(
+                            f"  • {method['type'].title()}: **{method['name']}** (line {method['line']})"
+                        )
+                    if len(result.public_methods) > 10:
+                        lines.append(
+                            f"  ... and {len(result.public_methods) - 10} more"
+                        )
+                    lines.append("")
+
+                # Business validations
+                if result.business_validations:
+                    lines.append("✅ **Business Validation Patterns:**")
+                    validation_types = {}
+                    for validation in result.business_validations:
+                        vtype = validation["type"]
+                        validation_types[vtype] = validation_types.get(vtype, 0) + 1
+
+                    for vtype, count in validation_types.items():
+                        lines.append(
+                            f"  • {vtype.replace('_', ' ').title()}: {count} validations"
+                        )
+
+                    lines.append("")
+                    lines.append("📝 **Sample Validations:**")
+                    for validation in result.business_validations[:3]:
+                        lines.append(
+                            f"  • **{validation['error_method']}** ({validation['type']}) - Line {validation['line']}"
+                        )
+                        pattern = (
+                            validation["pattern"][:80] + "..."
+                            if len(validation["pattern"]) > 80
+                            else validation["pattern"]
+                        )
+                        lines.append(f"    ↳ `{pattern}`")
+                    lines.append("")
+
+                # Constants for business logic
+                if result.constants:
+                    lines.append("🔤 **Business Constants:**")
+                    for const in result.constants[:8]:
+                        lines.append(
+                            f"  • **{const['name']}**: {const['type']} (line {const['line']})"
+                        )
+                    if len(result.constants) > 8:
+                        lines.append(f"  ... and {len(result.constants) - 8} more")
+                    lines.append("")
+
+                # AST structure
+                if result.ast:
+                    lines.append("🌳 **Code Structure (AST):**")
+                    node_counts = {}
+                    for child in result.ast.children:
+                        node_type = child.node_type.value
+                        node_counts[node_type] = node_counts.get(node_type, 0) + 1
+
+                    for node_type, count in sorted(node_counts.items()):
+                        lines.append(
+                            f"  • {node_type.replace('_', ' ').title()}: {count}"
+                        )
+                    lines.append("")
+
+                # Diagnostics
+                if result.diagnostics:
+                    lines.append("📋 **Issues & Recommendations:**")
+                    for diag in result.diagnostics[:5]:
+                        icon = {
+                            "error": "❌",
+                            "warning": "⚠️",
+                            "info": "ℹ️",
+                            "hint": "💡",
+                        }[diag.severity.value]
+                        lines.append(f"  {icon} Line {diag.line}: {diag.message}")
+                        if diag.fix_suggestion:
+                            lines.append(f"    💡 *Fix: {diag.fix_suggestion}*")
+                    if len(result.diagnostics) > 5:
+                        lines.append(f"  ... and {len(result.diagnostics) - 5} more")
+                    lines.append("")
+
+                lines.append("🎯 **AI Agent Insights:**")
+                lines.append("This PLSQL file provides business logic for:")
+                if result.logical_unit:
+                    lines.append(f"• **{result.logical_unit}** logical unit operations")
+                if result.public_methods:
+                    lines.append(
+                        f"• **{len(result.public_methods)} public APIs** for external integration"
+                    )
+                if result.business_validations:
+                    lines.append(
+                        f"• **{len(result.business_validations)} validation rules** ensuring data integrity"
+                    )
+                lines.append("• Business process automation and workflow management")
+                lines.append(
+                    "• Error handling and exception management for robust operations"
+                )
+
+                return "\\n".join(lines)
+
+            except Exception as e:
+                return f"❌ **Error analyzing PLSQL file:** {str(e)}"
+
+        @self.mcp.tool()
+        async def analyze_fragment_file(content: str, strict_mode: bool = False) -> str:
+            """Analyze IFS Cloud Fragment file for comprehensive UI understanding.
+
+            **AGENT INSTRUCTIONS:**
+            Use this tool to understand Fragment files (.fragment) that combine client and projection logic.
+
+            **Perfect for:**
+            - Understanding complete UI component structure
+            - Analyzing client-server integration patterns
+            - Finding UI validation and business logic connections
+            - Understanding fragment composition and reusability
+            - Extracting navigation and command patterns
+
+            **What you'll get:**
+            - Complete AST with both client and projection sections
+            - Header information (component, layer, dependencies)
+            - Client elements (pages, navigators, commands, lists)
+            - Projection elements (entities, queries, actions)
+            - Section boundaries and organization
+            - Zero false positives through conservative analysis
+
+            Args:
+                content: Fragment file content to analyze
+                strict_mode: If True, applies stricter validation (default: False)
+
+            Returns:
+                Comprehensive analysis of fragment structure and components
+            """
+            try:
+                result = self.fragment_analyzer.analyze(content)
+
+                lines = []
+                lines.append("🌟 **Fragment File Analysis**")
+                lines.append("=" * 45)
+                lines.append("")
+
+                # Validity and structure
+                lines.append(
+                    f"✅ **Analysis Result:** {'Valid Structure' if result.get('valid', False) else 'Issues Found'}"
+                )
+                lines.append(f"🔍 **Errors:** {len(result.get('errors', []))}")
+                lines.append(f"⚠️ **Warnings:** {len(result.get('warnings', []))}")
+                lines.append("")
+
+                # Fragment information
+                fragment_info = result.get("fragment_info", {})
+                lines.append("🏗️ **Fragment Structure:**")
+                lines.append(
+                    f"  • Fragment Name: {fragment_info.get('name', 'Not specified')}"
+                )
+                lines.append(
+                    f"  • Component: {fragment_info.get('component', 'Not specified')}"
+                )
+                lines.append(
+                    f"  • Layer: {fragment_info.get('layer', 'Not specified')}"
+                )
+                if fragment_info.get("description"):
+                    lines.append(f"  • Description: {fragment_info['description']}")
+                lines.append("")
+
+                # Section detection
+                sections = result.get("sections", {})
+                lines.append("📋 **Section Structure:**")
+                lines.append(
+                    f"  • Header Section: {'✅' if sections.get('header', False) else '❌'}"
+                )
+                lines.append(
+                    f"  • Client Fragments: {'✅' if sections.get('client_fragments', False) else '❌'}"
+                )
+                lines.append(
+                    f"  • Projection Fragments: {'✅' if sections.get('projection_fragments', False) else '❌'}"
+                )
+                lines.append("")
+
+                # AST analysis
+                ast = result.get("ast")
+                if ast:
+                    lines.append("🌳 **AST Structure Analysis:**")
+
+                    def count_nodes_by_type(node, counts=None):
+                        if counts is None:
+                            counts = {}
+
+                        node_type = node.get("node_type", "unknown")
+                        counts[node_type] = counts.get(node_type, 0) + 1
+
+                        for child in node.get("children", []):
+                            count_nodes_by_type(child, counts)
+
+                        return counts
+
+                    node_counts = count_nodes_by_type(ast)
+                    total_nodes = sum(node_counts.values())
+                    lines.append(f"  • Total Nodes: {total_nodes}")
+
+                    # Show node type distribution
+                    for node_type, count in sorted(node_counts.items()):
+                        if node_type != "fragment_file":  # Skip root
+                            icon = {
+                                "header_section": "🔖",
+                                "client_fragments_section": "🖥️",
+                                "projection_fragments_section": "🗃️",
+                                "fragment_declaration": "📋",
+                                "component_declaration": "🏢",
+                                "layer_declaration": "🏗️",
+                                "page_declaration": "📄",
+                                "navigator_section": "🧭",
+                                "command_declaration": "⚡",
+                                "entity": "🏛️",
+                                "query": "🔍",
+                                "action": "⚙️",
+                                "function": "🔧",
+                            }.get(node_type, "📌")
+                            lines.append(
+                                f"  {icon} {node_type.replace('_', ' ').title()}: {count}"
+                            )
+                    lines.append("")
+
+                # Client section details
+                client_elements = self._extract_client_elements_from_ast(ast)
+                if client_elements:
+                    lines.append("🖥️ **Client Fragment Elements:**")
+                    for element_type, elements in client_elements.items():
+                        if elements:
+                            lines.append(
+                                f"  • {element_type.title()}: {len(elements)} found"
+                            )
+                            for element in elements[:3]:  # Show first 3
+                                name = element.get("properties", {}).get(
+                                    "name", "Unnamed"
+                                )
+                                line_num = element.get("start_line", "?")
+                                lines.append(f"    - {name} (line {line_num})")
+                            if len(elements) > 3:
+                                lines.append(f"    ... and {len(elements) - 3} more")
+                    lines.append("")
+
+                # Projection section details
+                projection_elements = self._extract_projection_elements_from_ast(ast)
+                if projection_elements:
+                    lines.append("🗃️ **Projection Fragment Elements:**")
+                    for element_type, elements in projection_elements.items():
+                        if elements:
+                            lines.append(
+                                f"  • {element_type.title()}: {len(elements)} found"
+                            )
+                            for element in elements[:3]:  # Show first 3
+                                name = element.get("properties", {}).get(
+                                    "name", "Unnamed"
+                                )
+                                line_num = element.get("start_line", "?")
+                                lines.append(f"    - {name} (line {line_num})")
+                            if len(elements) > 3:
+                                lines.append(f"    ... and {len(elements) - 3} more")
+                    lines.append("")
+
+                # Dependencies and includes
+                includes = fragment_info.get("includes", [])
+                if includes:
+                    lines.append("📦 **Dependencies:**")
+                    for include in includes:
+                        lines.append(f"  • {include}")
+                    lines.append("")
+
+                lines.append("🎯 **AI Agent Insights:**")
+                lines.append("This fragment provides:")
+                if client_elements:
+                    lines.append("• **Client-side UI components** for user interaction")
+                if projection_elements:
+                    lines.append(
+                        "• **Server-side data access** and business logic integration"
+                    )
+                lines.append("• **Full-stack component** combining UI and data layers")
+                lines.append(
+                    "• **Reusable fragment** for modular application architecture"
+                )
+
+                return "\\n".join(lines)
+
+            except Exception as e:
+                return f"❌ **Error analyzing Fragment file:** {str(e)}"
+
+    def _extract_client_elements_from_ast(self, ast):
+        """Extract client elements from AST for analysis display"""
+        if not ast:
+            return {}
+
+        elements = {"pages": [], "navigators": [], "commands": [], "lists": []}
+
+        def extract_from_node(node):
+            node_type = node.get("node_type", "")
+            if node_type == "page_declaration":
+                elements["pages"].append(node)
+            elif node_type == "navigator_section":
+                elements["navigators"].append(node)
+            elif node_type == "command_declaration":
+                elements["commands"].append(node)
+            elif node_type == "list":
+                elements["lists"].append(node)
+
+            # Recurse through children
+            for child in node.get("children", []):
+                extract_from_node(child)
+
+        extract_from_node(ast)
+        return elements
+
+    def _extract_projection_elements_from_ast(self, ast):
+        """Extract projection elements from AST for analysis display"""
+        if not ast:
+            return {}
+
+        elements = {"entities": [], "queries": [], "actions": [], "functions": []}
+
+        def extract_from_node(node):
+            node_type = node.get("node_type", "")
+            if node_type == "entity":
+                elements["entities"].append(node)
+            elif node_type == "query":
+                elements["queries"].append(node)
+            elif node_type == "action":
+                elements["actions"].append(node)
+            elif node_type == "function":
+                elements["functions"].append(node)
+
+            # Recurse through children
+            for child in node.get("children", []):
+                extract_from_node(child)
+
+        extract_from_node(ast)
+        return elements
 
     def _format_search_results(self, results: List[SearchResult], title: str) -> str:
         """Format search results for display."""
