@@ -4,6 +4,7 @@ FastAPI Web UI for IFS Cloud MCP Server with type-ahead search.
 Provides a Meilisearch-like interface for exploring IFS Cloud codebases.
 """
 
+import argparse
 import asyncio
 import json
 import logging
@@ -772,10 +773,25 @@ def find_available_port(start_port: int = 5700, max_port: int = 5799) -> int:
 
 # Main application entry point
 if __name__ == "__main__":
+    """Main entry point for Web UI."""
+    parser = argparse.ArgumentParser(description="IFS Cloud MCP Server Web UI")
+    parser.add_argument(
+        "--index-path",
+        type=str,
+        default="./index",
+        help="Path to store the Tantivy index (default: ./index)",
+    )
+
+    args = parser.parse_args()
+
+    # Create index directory if it doesn't exist
+    index_path = Path(args.index_path)
+    index_path.mkdir(parents=True, exist_ok=True)
+
     import uvicorn
 
     # Create the web UI application
-    web_ui = IFSCloudWebUI()
+    web_ui = IFSCloudWebUI(index_path=index_path)
 
     # Find an available port in the 8000 series
     try:
@@ -790,7 +806,7 @@ if __name__ == "__main__":
         print("  • Responsive design with modern UI")
 
         # Start the server
-        uvicorn.run(web_ui.app, host="0.0.0.0", port=port, reload=False)
+        uvicorn.run(web_ui.app, host="localhost", port=port, reload=False)
 
     except RuntimeError as e:
         print(f"❌ Failed to start web UI: {e}")
