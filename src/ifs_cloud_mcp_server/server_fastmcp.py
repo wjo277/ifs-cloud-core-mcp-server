@@ -3537,6 +3537,311 @@ selector {fragment_name}Selector {{
             except Exception as e:
                 return f"❌ **Error analyzing Fragment file:** {str(e)}"
 
+        @self.mcp.tool()
+        async def intelligent_context_analysis(
+            business_requirement: str,
+            domain: Optional[str] = None,
+            max_files_to_analyze: int = 15,
+        ) -> str:
+            """Intelligently analyze IFS Cloud codebase context for a business requirement.
+
+            **🎯 AI AGENT PRIORITY TOOL - USE THIS FIRST!**
+
+            This tool automatically:
+            1. Searches for relevant existing implementations
+            2. Analyzes found files with appropriate analyzers
+            3. Identifies patterns, APIs, and best practices
+            4. Provides comprehensive context for implementation
+
+            **When to use:**
+            - Before implementing ANY new feature
+            - When you receive a business requirement
+            - To understand existing patterns and approaches
+            - To ensure consistency with IFS Cloud standards
+
+            **Examples:**
+            - intelligent_context_analysis("Create customer order validation", "ORDER")
+            - intelligent_context_analysis("Add pricing calculation", "FINANCE")
+            - intelligent_context_analysis("Build user interface for products", "PRODUCT")
+
+            Args:
+                business_requirement: Description of what needs to be implemented
+                domain: Optional domain/module hint (ORDER, FINANCE, PROJECT, etc.)
+                max_files_to_analyze: Maximum files to analyze in depth (default: 15)
+            """
+            try:
+                lines = []
+                lines.append("🧠 **Intelligent Context Analysis**")
+                lines.append("=" * 60)
+                lines.append(f"📋 **Requirement:** {business_requirement}")
+                if domain:
+                    lines.append(f"🏢 **Domain:** {domain}")
+                lines.append("")
+
+                # Phase 1: Extract key terms and concepts
+                lines.append("🔍 **Phase 1: Concept Extraction**")
+                lines.append("-" * 40)
+
+                # Extract keywords from business requirement
+                keywords = self._extract_business_keywords(business_requirement)
+                lines.append(f"📝 **Key Terms:** {', '.join(keywords)}")
+                lines.append("")
+
+                # Phase 2: Strategic searches for relevant files
+                lines.append("🔎 **Phase 2: Strategic Discovery**")
+                lines.append("-" * 40)
+
+                relevant_files = []
+                search_strategies = []
+
+                # Strategy 1: Direct keyword searches
+                for keyword in keywords[:3]:  # Top 3 keywords
+                    query = keyword
+                    if domain:
+                        query += f" module:{domain.lower()}"
+
+                    search_results = self.indexer.search_deduplicated(
+                        query=query, limit=5, file_type=None
+                    )
+
+                    if search_results:
+                        search_strategies.append(
+                            f"'{keyword}' → {len(search_results)} files"
+                        )
+                        relevant_files.extend(search_results[:3])
+
+                # Strategy 2: Pattern-based searches
+                pattern_searches = [
+                    ("validation", "business validation patterns"),
+                    ("calculation", "calculation and pricing logic"),
+                    ("API", "public API implementations"),
+                    ("Check_", "validation methods"),
+                    ("Get_", "information retrieval methods"),
+                    ("Create_", "creation and insertion logic"),
+                ]
+
+                for pattern, description in pattern_searches:
+                    if pattern.lower() in business_requirement.lower():
+                        query = pattern
+                        if domain:
+                            query += f" module:{domain.lower()}"
+
+                        search_results = self.indexer.search_deduplicated(
+                            query=query, limit=3, file_type=".plsql"
+                        )
+
+                        if search_results:
+                            search_strategies.append(
+                                f"{description} → {len(search_results)} files"
+                            )
+                            relevant_files.extend(search_results[:2])
+
+                # Strategy 3: Entity-based searches
+                if domain:
+                    entity_query = f"module:{domain.lower()}"
+                    entity_results = self.indexer.search_deduplicated(
+                        query=entity_query, limit=5, file_type=".entity"
+                    )
+                    if entity_results:
+                        search_strategies.append(
+                            f"Domain entities → {len(entity_results)} files"
+                        )
+                        relevant_files.extend(entity_results[:2])
+
+                lines.append("📊 **Search Strategies:**")
+                for strategy in search_strategies[:8]:  # Limit output
+                    lines.append(f"   • {strategy}")
+                lines.append("")
+
+                # Remove duplicates and limit files
+                seen_paths = set()
+                unique_files = []
+                for file in relevant_files:
+                    if file.file_path not in seen_paths:
+                        seen_paths.add(file.file_path)
+                        unique_files.append(file)
+                        if len(unique_files) >= max_files_to_analyze:
+                            break
+
+                lines.append(f"📁 **Selected Files for Analysis:** {len(unique_files)}")
+                lines.append("")
+
+                # Phase 3: Deep analysis of selected files
+                lines.append("🔬 **Phase 3: Deep Analysis**")
+                lines.append("-" * 40)
+
+                api_methods = []
+                validation_patterns = []
+                business_logic = []
+
+                for i, file_result in enumerate(unique_files[:max_files_to_analyze], 1):
+                    try:
+                        file_path = Path(file_result.file_path)
+                        file_ext = file_path.suffix.lower()
+
+                        lines.append(f"📄 **File {i}: {file_path.name}**")
+                        lines.append(
+                            f"   Type: {file_ext} | Complexity: {file_result.complexity_score:.2f}"
+                        )
+
+                        if file_result.module:
+                            lines.append(f"   Module: {file_result.module}")
+                        if file_result.logical_unit:
+                            lines.append(f"   Logical Unit: {file_result.logical_unit}")
+
+                        # Read and analyze file based on type
+                        content = file_path.read_text(encoding="utf-8")
+
+                        if file_ext == ".plsql":
+                            # PLSQL Analysis
+                            plsql_result = self.plsql_analyzer.analyze(content)
+
+                            lines.append(
+                                f"   🔧 Methods: {len(plsql_result.public_methods)} public, {len(plsql_result.private_methods)} private"
+                            )
+                            lines.append(
+                                f"   ✅ Validations: {len(plsql_result.business_validations)}"
+                            )
+
+                            # Extract patterns
+                            api_methods.extend(
+                                [
+                                    f"{plsql_result.logical_unit}.{m['name']}"
+                                    for m in plsql_result.public_methods
+                                ]
+                            )
+                            validation_patterns.extend(
+                                plsql_result.business_validations
+                            )
+                            business_logic.append(
+                                {
+                                    "file": file_path.name,
+                                    "logical_unit": plsql_result.logical_unit,
+                                    "component": plsql_result.component,
+                                    "public_apis": len(plsql_result.public_methods),
+                                    "validations": len(
+                                        plsql_result.business_validations
+                                    ),
+                                }
+                            )
+
+                        elif file_ext == ".entity":
+                            # Entity files - extract structure info
+                            entity_info = self._extract_entity_info(content)
+                            lines.append(
+                                f"   📊 Entity: {entity_info.get('name', 'Unknown')}"
+                            )
+                            if entity_info.get("attributes"):
+                                lines.append(
+                                    f"   📋 Attributes: {len(entity_info['attributes'])}"
+                                )
+
+                        elif file_ext == ".client":
+                            # Client Analysis
+                            client_result = self.client_analyzer.analyze(content)
+                            if isinstance(client_result, dict):
+                                lines.append(f"   🖥️ Client Structure Analyzed")
+                            else:
+                                lines.append(
+                                    f"   🖥️ Pages: {len(getattr(client_result, 'pages', []))}"
+                                )
+                                lines.append(
+                                    f"   📋 Commands: {len(getattr(client_result, 'commands', []))}"
+                                )
+
+                        elif file_ext == ".projection":
+                            # Projection Analysis
+                            proj_result = self.projection_analyzer.analyze(content)
+                            lines.append(f"   🗃️ Entities: {len(proj_result.entities)}")
+                            lines.append(f"   ⚙️ Actions: {len(proj_result.actions)}")
+
+                        elif file_ext == ".fragment":
+                            # Fragment Analysis
+                            frag_result = self.fragment_analyzer.analyze(content)
+                            sections = frag_result.get_section_analysis()
+                            section_count = sum(1 for v in sections.values() if v)
+                            lines.append(f"   🌟 Sections: {section_count}")
+
+                        lines.append("")
+
+                    except Exception as e:
+                        lines.append(f"   ❌ Analysis error: {str(e)}")
+                        lines.append("")
+                        continue
+
+                # Phase 4: Pattern synthesis and recommendations
+                lines.append("🎯 **Phase 4: Implementation Guidance**")
+                lines.append("-" * 40)
+
+                lines.append("📈 **Discovered Patterns:**")
+                if api_methods:
+                    lines.append(f"   • {len(api_methods)} Public APIs available")
+                    lines.append(
+                        f"   • Common API patterns: {', '.join(sorted(set([m.split('.')[-1].split('_')[0] for m in api_methods[:10]]))[:5])}"
+                    )
+
+                if validation_patterns:
+                    lines.append(
+                        f"   • {len(validation_patterns)} Validation rules found"
+                    )
+                    common_validations = [v["type"] for v in validation_patterns[:5]]
+                    lines.append(
+                        f"   • Common validations: {', '.join(common_validations)}"
+                    )
+
+                if business_logic:
+                    components = set(
+                        [bl["component"] for bl in business_logic if bl["component"]]
+                    )
+                    if components:
+                        lines.append(
+                            f"   • Active components: {', '.join(sorted(components))}"
+                        )
+
+                lines.append("")
+                lines.append("🚀 **Implementation Recommendations:**")
+
+                # Generate specific recommendations based on analysis
+                if business_logic:
+                    avg_apis = sum(bl["public_apis"] for bl in business_logic) / len(
+                        business_logic
+                    )
+                    lines.append(
+                        f"   • Follow existing API patterns (avg {avg_apis:.1f} public methods per LU)"
+                    )
+
+                if validation_patterns:
+                    lines.append(
+                        "   • Implement validation rules following discovered patterns"
+                    )
+                    lines.append(
+                        "   • Use Check_Insert___ / Check_Update___ naming conventions"
+                    )
+
+                if api_methods:
+                    lines.append("   • Leverage existing APIs where possible:")
+                    for api in api_methods[:5]:
+                        lines.append(f"     - {api}")
+
+                # Domain-specific recommendations
+                if domain:
+                    lines.append(
+                        f"   • Ensure compliance with {domain} module standards"
+                    )
+                    lines.append(
+                        f"   • Follow {domain} naming conventions and patterns"
+                    )
+
+                lines.append("")
+                lines.append(
+                    "✅ **Context Analysis Complete - Ready for Implementation!**"
+                )
+
+                return "\\n".join(lines)
+
+            except Exception as e:
+                return f"❌ Error in intelligent context analysis: {str(e)}"
+
     def _extract_client_elements_from_ast(self, ast):
         """Extract client elements from AST for analysis display"""
         if not ast:
@@ -3644,6 +3949,101 @@ selector {fragment_name}Selector {{
             self.mcp.run(transport="stdio")
         else:
             raise ValueError(f"Unsupported transport type: {transport_type}")
+
+    def _extract_business_keywords(self, business_requirement: str) -> List[str]:
+        """Extract meaningful keywords from a business requirement."""
+        import re
+
+        # Common IFS Cloud business terms that should be preserved
+        ifs_terms = [
+            "customer",
+            "order",
+            "product",
+            "invoice",
+            "project",
+            "supplier",
+            "validation",
+            "calculation",
+            "pricing",
+            "approval",
+            "workflow",
+            "entity",
+            "api",
+            "method",
+            "function",
+            "check",
+            "get",
+            "create",
+            "update",
+            "delete",
+            "insert",
+            "modify",
+            "retrieve",
+            "generate",
+            "business",
+            "logic",
+            "rule",
+            "constraint",
+            "requirement",
+        ]
+
+        # Clean and tokenize the requirement
+        cleaned = re.sub(r"[^\w\s]", " ", business_requirement.lower())
+        words = cleaned.split()
+
+        # Extract meaningful keywords
+        keywords = []
+        for word in words:
+            if len(word) > 3 and word in ifs_terms:
+                keywords.append(word)
+
+        # Add compound terms
+        for i in range(len(words) - 1):
+            compound = f"{words[i]}_{words[i+1]}"
+            if len(words[i]) > 2 and len(words[i + 1]) > 2:
+                if any(
+                    term in compound
+                    for term in [
+                        "customer_order",
+                        "product_info",
+                        "price_calc",
+                        "order_line",
+                    ]
+                ):
+                    keywords.append(compound)
+
+        # Remove duplicates and limit to top terms
+        keywords = list(dict.fromkeys(keywords))[:8]
+
+        # If no specific terms found, use all significant words
+        if not keywords:
+            keywords = [word for word in words if len(word) > 4][:5]
+
+        return keywords
+
+    def _extract_entity_info(self, content: str) -> Dict[str, Any]:
+        """Extract basic entity information from entity file content."""
+        import re
+
+        info = {}
+
+        # Extract entity name
+        entity_match = re.search(r"entity\s+(\w+)", content, re.IGNORECASE)
+        if entity_match:
+            info["name"] = entity_match.group(1)
+
+        # Count attributes
+        attributes = re.findall(
+            r"^\s*attribute\s+\w+", content, re.MULTILINE | re.IGNORECASE
+        )
+        info["attributes"] = attributes
+
+        # Extract keys
+        keys_match = re.search(r"keys\s*=\s*([^;]+)", content, re.IGNORECASE)
+        if keys_match:
+            info["keys"] = keys_match.group(1).strip()
+
+        return info
 
     def cleanup(self):
         """Clean up resources."""
