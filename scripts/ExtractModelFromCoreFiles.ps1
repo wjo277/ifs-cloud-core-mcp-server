@@ -7,7 +7,7 @@ param(
 )
 
 # Define the target extensions (case-insensitive)
-$TargetExtensions = @('.entity', '.plsql', '.views', '.storage', '.fragment', '.client', '.projection', '.plsvc')
+$TargetExtensions = @('.entity', '.plsql', '.views', '.storage', '.fragment', '.client', '.projection', '.plsvc', '.enumeration')
 
 # Get the script's directory and create the work directory path
 $WorkDir = Join-Path $PSScriptRoot "../_work"
@@ -16,30 +16,118 @@ function Get-IFSCloudCoreLocation {
   param([string]$ProvidedPath)
 
   if ($ProvidedPath -and (Test-Path $ProvidedPath)) {
-    return $ProvidedPath
+    # Validate that this looks like an IFS Cloud Core directory
+    if (Test-IFSCloudCoreDirectory -Path $ProvidedPath) {
+      return $ProvidedPath
+    }
+    else {
+      Write-Host "Warning: The provided path '$ProvidedPath' does not appear to be a valid IFS Cloud Core Codes directory." -ForegroundColor Yellow
+    }
+  }
+
+  # Try to find common IFS Cloud locations
+  $CommonPaths = @(
+    "C:\IFS\Cloud\Core",
+    "C:\IFS\Cloud\Codes",
+    "C:\Program Files\IFS\Cloud\Core",
+    "D:\IFS\Cloud\Core",
+    "E:\IFS\Cloud\Core"
+  )
+
+  Write-Host "`nLooking for IFS Cloud Core directories in common locations..." -ForegroundColor Yellow
+  $FoundPaths = @()
+
+  foreach ($path in $CommonPaths) {
+    if (Test-Path $path) {
+      if (Test-IFSCloudCoreDirectory -Path $path) {
+        $FoundPaths += $path
+        Write-Host "  ✓ Found: $path" -ForegroundColor Green
+      }
+    }
+  }
+
+  if ($FoundPaths.Count -gt 0) {
+    Write-Host "`nFound $($FoundPaths.Count) potential IFS Cloud Core directories:" -ForegroundColor Green
+    for ($i = 0; $i -lt $FoundPaths.Count; $i++) {
+      Write-Host "  [$($i + 1)] $($FoundPaths[$i])" -ForegroundColor Cyan
+    }
+    Write-Host "  [0] None of these - I'll provide my own path" -ForegroundColor Cyan
+
+    do {
+      $choice = Read-Host "`nSelect a directory [0-$($FoundPaths.Count)]"
+      if ($choice -match '^\d+$' -and [int]$choice -ge 0 -and [int]$choice -le $FoundPaths.Count) {
+        if ([int]$choice -eq 0) {
+          break
+        }
+        else {
+          return $FoundPaths[[int]$choice - 1]
+        }
+      }
+      Write-Host "Invalid choice. Please enter a number between 0 and $($FoundPaths.Count)." -ForegroundColor Red
+    } while ($true)
   }
 
   do {
-    Write-Host "Please enter the path to the IFS Cloud Core Codes directory:" -ForegroundColor Yellow
-    $userPath = Read-Host
+    Write-Host "`nPlease enter the path to the IFS Cloud Core Codes directory:" -ForegroundColor Yellow
+    Write-Host "Example: C:\IFS\Cloud\Core" -ForegroundColor Gray
+    $selectedPath = Read-Host "Path"
 
-    if ([string]::IsNullOrWhiteSpace($userPath)) {
+    if ([string]::IsNullOrWhiteSpace($selectedPath)) {
       Write-Host "Path cannot be empty. Please try again." -ForegroundColor Red
       continue
     }
 
-    if (-not (Test-Path $userPath)) {
-      Write-Host "Path '$userPath' does not exist. Please try again." -ForegroundColor Red
+    Write-Host "Entered path: $selectedPath" -ForegroundColor Cyan    if (-not (Test-Path $selectedPath)) {
+      Write-Host "Selected path '$selectedPath' does not exist. Please try again." -ForegroundColor Red
       continue
     }
 
-    if (-not (Test-Path $userPath -PathType Container)) {
-      Write-Host "Path '$userPath' is not a directory. Please try again." -ForegroundColor Red
+    if (-not (Test-Path $selectedPath -PathType Container)) {
+      Write-Host "Selected path '$selectedPath' is not a directory. Please try again." -ForegroundColor Red
       continue
     }
 
-    return $userPath
+    # Validate that this looks like an IFS Cloud Core directory
+    if (-not (Test-IFSCloudCoreDirectory -Path $selectedPath)) {
+      Write-Host "Selected path '$selectedPath' does not appear to be a valid IFS Cloud Core Codes directory." -ForegroundColor Red
+      Write-Host "Expected to find subdirectories with IFS Cloud modules (like 'order', 'proj', 'invent', etc.)" -ForegroundColor Red
+      Write-Host "Please select a different directory." -ForegroundColor Red
+      continue
+    }
+
+    return $selectedPath
   } while ($true)
+}
+
+function Test-IFSCloudCoreDirectory {
+  param([string]$Path)
+
+  # Check for common IFS Cloud module directories
+  $CommonModules = @('order', 'proj', 'invent', 'fndcob', 'mfgstd', 'purch', 'genled', 'appsrv')
+  $FoundModules = 0
+
+  foreach ($module in $CommonModules) {
+    if (Test-Path (Join-Path $Path $module)) {
+      $FoundModules++
+    }
+  }
+
+  # If we find at least 3 common modules, consider it valid
+  if ($FoundModules -ge 3) {
+    return $true
+  }
+
+  # Alternative check: look for any directories containing our target file types
+  $SubDirectories = Get-ChildItem -Path $Path -Directory -ErrorAction SilentlyContinue
+  foreach ($dir in $SubDirectories) {
+    $IncludeFilter = $TargetExtensions | ForEach-Object { "*$_" }
+    $FilesFound = Get-ChildItem -Path $dir.FullName -Recurse -File -Include $IncludeFilter -ErrorAction SilentlyContinue
+    if ($FilesFound.Count -gt 0) {
+      return $true
+    }
+  }
+
+  return $false
 }
 
 function Copy-FilesWithStructure {
@@ -55,9 +143,31 @@ function Copy-FilesWithStructure {
   if (Test-Path $DestinationRoot) {
     $existingFiles = Get-ChildItem -Path $DestinationRoot -Recurse -File
     if ($existingFiles.Count -gt 0) {
-      Write-Host "Error: Destination directory '$DestinationRoot' already exists and is not empty." -ForegroundColor Red
-      Write-Host "Please delete or rename the existing directory before running this script." -ForegroundColor Red
-      throw "Destination directory is not empty. Operation aborted."
+      Write-Host "Warning: Destination directory '$DestinationRoot' already exists and contains $($existingFiles.Count) files." -ForegroundColor Yellow
+      Write-Host "Do you want to:" -ForegroundColor Yellow
+      Write-Host "  [O] Overwrite (delete existing directory and create new)" -ForegroundColor Cyan
+      Write-Host "  [M] Merge (add new files, overwrite existing files with same name)" -ForegroundColor Cyan
+      Write-Host "  [C] Cancel operation" -ForegroundColor Cyan
+
+      do {
+        $choice = Read-Host "Enter your choice [O/M/C]"
+        $choice = $choice.ToUpper()
+      } while ($choice -notin @('O', 'M', 'C'))
+
+      switch ($choice) {
+        'O' {
+          Write-Host "Removing existing directory..." -ForegroundColor Yellow
+          Remove-Item -Path $DestinationRoot -Recurse -Force
+          Write-Host "Existing directory removed." -ForegroundColor Green
+        }
+        'M' {
+          Write-Host "Merging files into existing directory..." -ForegroundColor Green
+        }
+        'C' {
+          Write-Host "Operation cancelled by user." -ForegroundColor Red
+          return
+        }
+      }
     }
   }
 

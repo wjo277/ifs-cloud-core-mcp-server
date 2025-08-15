@@ -13,13 +13,14 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
+import tantivy
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from src.ifs_cloud_mcp_server.indexer import IFSCloudTantivyIndexer, SearchResult
+from .indexer import IFSCloudTantivyIndexer, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,38 @@ class WebUISearchResult(BaseModel):
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
+
+
+class FileContentResponse(BaseModel):
+    """Enhanced file content response with search context."""
+
+    path: str
+    name: str
+    type: str
+    content: str
+    highlighted_content: str
+    size: int
+    lines: int
+    entities: List[str] = []
+    functions: List[str] = []
+    module: Optional[str] = None
+    logical_unit: Optional[str] = None
+    entity_name: Optional[str] = None
+    component: Optional[str] = None
+    complexity_score: float = 0.0
+    pagerank_score: float = 0.0
+    modified_time: Optional[datetime] = None
+    # Frontend elements
+    pages: List[str] = []
+    lists: List[str] = []
+    groups: List[str] = []
+    iconsets: List[str] = []
+    trees: List[str] = []
+    navigators: List[str] = []
+    # Search context
+    search_query: Optional[str] = None
+    match_count: int = 0
+    match_lines: List[int] = []
 
 
 class IFSCloudWebUI:
@@ -145,13 +178,15 @@ class IFSCloudWebUI:
                     )
 
                 logger.debug(
-                    f"Performing search: query='{q}', limit={limit}, file_type={file_type}"
+                    f"Performing search: query='{q}', limit={limit}, file_type={file_type}, module={module}, logical_unit={logical_unit}"
                 )
 
                 results = self.indexer.search_deduplicated(
                     query=q,
                     limit=limit,
                     file_type=file_type,
+                    module=module,
+                    logical_unit=logical_unit,
                     min_complexity=min_complexity,
                     max_complexity=max_complexity,
                 )
@@ -161,12 +196,8 @@ class IFSCloudWebUI:
                 # Convert to web UI format with enhanced data
                 web_results = []
                 for result in results:
-                    # Create tags based on content
+                    # Create tags based on content (excluding module/logical_unit as they have clickable badges now)
                     tags = []
-                    if result.module:
-                        tags.append(f"module:{result.module}")
-                    if result.logical_unit:
-                        tags.append(f"lu:{result.logical_unit}")
                     if result.component:
                         tags.append(f"component:{result.component}")
                     if result.pages:
@@ -251,6 +282,8 @@ class IFSCloudWebUI:
                     request.query,
                     limit=request.limit,
                     file_type=getattr(request, "file_type", None),
+                    module=getattr(request, "module", None),
+                    logical_unit=getattr(request, "logical_unit", None),
                     min_complexity=getattr(request, "min_complexity", None),
                     max_complexity=getattr(request, "max_complexity", None),
                 )
@@ -258,12 +291,8 @@ class IFSCloudWebUI:
                 # Convert results to web format
                 web_results = []
                 for result in results:
-                    # Generate tags for better categorization
+                    # Generate tags for better categorization (excluding module/logical_unit as they have clickable badges now)
                     tags = []
-                    if result.module:
-                        tags.append(f"module:{result.module}")
-                    if result.logical_unit:
-                        tags.append(f"unit:{result.logical_unit}")
                     if result.component:
                         tags.append(f"component:{result.component}")
                     if result.pages:
@@ -346,6 +375,8 @@ class IFSCloudWebUI:
                     request.query,
                     limit=request.limit,
                     file_type=getattr(request, "file_type", None),
+                    module=getattr(request, "module", None),
+                    logical_unit=getattr(request, "logical_unit", None),
                     min_complexity=getattr(request, "min_complexity", None),
                     max_complexity=getattr(request, "max_complexity", None),
                 )
@@ -536,24 +567,182 @@ class IFSCloudWebUI:
                 raise HTTPException(status_code=500, detail=str(e))
 
         @self.app.get("/api/file/{file_path:path}")
-        async def get_file_content(file_path: str):
-            """Get file content for preview."""
+        async def get_file_content(
+            file_path: str,
+            search_query: Optional[str] = Query(
+                None, description="Search query for highlighting"
+            ),
+        ):
+            """Get enhanced file content with search highlighting and metadata."""
             try:
                 path = Path(file_path)
                 if not path.exists():
                     raise HTTPException(status_code=404, detail="File not found")
 
                 content = path.read_text(encoding="utf-8", errors="ignore")
-                return JSONResponse(
-                    {
-                        "path": str(path),
-                        "content": content,
-                        "size": len(content),
-                        "lines": len(content.split("\n")),
-                    }
+
+                # Get file metadata from search index if available
+                file_metadata = await self._get_file_metadata(str(path))
+
+                # Create highlighted content and find matches
+                highlighted_content = content
+                match_count = 0
+                match_lines = []
+
+                if search_query:
+                    highlighted_content, match_count, match_lines = (
+                        self._create_highlighted_content(content, search_query)
+                    )
+
+                response = FileContentResponse(
+                    path=str(path),
+                    name=path.name,
+                    type=path.suffix,
+                    content=content,
+                    highlighted_content=highlighted_content,
+                    size=len(content),
+                    lines=len(content.split("\n")),
+                    search_query=search_query,
+                    match_count=match_count,
+                    match_lines=match_lines,
+                    **file_metadata,
                 )
+
+                return response
+
             except Exception as e:
+                logger.error(f"Error getting file content for {file_path}: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
+
+    async def _get_file_metadata(self, file_path: str) -> dict:
+        """Get file metadata from the search index."""
+        try:
+            if not self.indexer._index:
+                return {}
+
+            searcher = self.indexer._index.searcher()
+
+            # Search for the specific file
+            query = tantivy.Query.term_query(
+                self.indexer._index.schema().get_field("path"), file_path
+            )
+            results = searcher.search(query, limit=1)
+
+            if results.hits:
+                _, doc_address = results.hits[0]
+                doc = searcher.doc(doc_address)
+
+                return {
+                    "entities": (
+                        doc.get_first("entities").split()
+                        if doc.get_first("entities")
+                        else []
+                    ),
+                    "functions": (
+                        doc.get_first("functions").split()
+                        if doc.get_first("functions")
+                        else []
+                    ),
+                    "module": doc.get_first("module"),
+                    "logical_unit": doc.get_first("logical_unit"),
+                    "entity_name": doc.get_first("entity_name"),
+                    "component": doc.get_first("component"),
+                    "complexity_score": doc.get_first("complexity_score") or 0.0,
+                    "pagerank_score": doc.get_first("pagerank_score") or 0.0,
+                    "modified_time": datetime.fromisoformat(
+                        str(doc.get_first("modified_time"))
+                        if doc.get_first("modified_time")
+                        else "1970-01-01T00:00:00"
+                    ),
+                    "pages": (
+                        doc.get_first("pages").split() if doc.get_first("pages") else []
+                    ),
+                    "lists": (
+                        doc.get_first("lists").split() if doc.get_first("lists") else []
+                    ),
+                    "groups": (
+                        doc.get_first("groups").split()
+                        if doc.get_first("groups")
+                        else []
+                    ),
+                    "iconsets": (
+                        doc.get_first("iconsets").split()
+                        if doc.get_first("iconsets")
+                        else []
+                    ),
+                    "trees": (
+                        doc.get_first("trees").split() if doc.get_first("trees") else []
+                    ),
+                    "navigators": (
+                        doc.get_first("navigators").split()
+                        if doc.get_first("navigators")
+                        else []
+                    ),
+                }
+        except Exception as e:
+            logger.error(f"Error getting metadata for {file_path}: {e}")
+
+        return {}
+
+    def _create_highlighted_content(
+        self, content: str, search_query: str
+    ) -> tuple[str, int, List[int]]:
+        """Create highlighted content with search matches marked.
+
+        Returns:
+            Tuple of (highlighted_content, match_count, match_lines)
+        """
+        if not search_query or not content:
+            return content, 0, []
+
+        lines = content.split("\n")
+        highlighted_lines = []
+        match_count = 0
+        match_lines = []
+
+        # Case-insensitive search
+        query_lower = search_query.lower()
+
+        for line_num, line in enumerate(lines, 1):
+            line_lower = line.lower()
+            highlighted_line = line
+
+            # Find all matches in this line
+            start_pos = 0
+            line_has_match = False
+
+            while True:
+                match_pos = line_lower.find(query_lower, start_pos)
+                if match_pos == -1:
+                    break
+
+                # Mark this line as having a match
+                if not line_has_match:
+                    match_lines.append(line_num)
+                    line_has_match = True
+
+                # Highlight the match
+                before = highlighted_line[:match_pos]
+                match_text = highlighted_line[match_pos : match_pos + len(search_query)]
+                after = highlighted_line[match_pos + len(search_query) :]
+
+                highlighted_line = (
+                    f"{before}<mark class='search-highlight'>{match_text}</mark>{after}"
+                )
+                match_count += 1
+
+                # Update search position, accounting for added HTML
+                start_pos = (
+                    match_pos
+                    + len(search_query)
+                    + len("<mark class='search-highlight'></mark>")
+                )
+                line_lower = highlighted_line.lower()
+
+            highlighted_lines.append(highlighted_line)
+
+        highlighted_content = "\n".join(highlighted_lines)
+        return highlighted_content, match_count, match_lines
 
     async def _generate_suggestions(
         self, query: str, limit: int
@@ -804,6 +993,12 @@ if __name__ == "__main__":
         print("  • Module-aware search and filtering")
         print("  • Real-time search with highlighting")
         print("  • Responsive design with modern UI")
+
+        # Enable debug logging
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
 
         # Start the server
         uvicorn.run(web_ui.app, host="localhost", port=port, reload=False)
