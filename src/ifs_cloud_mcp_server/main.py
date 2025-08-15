@@ -192,136 +192,6 @@ async def build_index_for_extract(extract_path: Path, index_path: Path) -> bool:
         return False
 
 
-async def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="IFS Cloud MCP Server with Tantivy search"
-    )
-
-    # Add subcommands
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # Server command (default)
-    server_parser = subparsers.add_parser("server", help="Start MCP server")
-
-    # Create mutually exclusive group for index-path vs version
-    index_group = server_parser.add_mutually_exclusive_group()
-    index_group.add_argument(
-        "--index-path",
-        type=str,
-        help="Path to store the Tantivy index (default: ./index if no version specified)",
-    )
-    index_group.add_argument(
-        "--version",
-        type=str,
-        help="IFS Cloud version to use (automatically resolves index path)",
-    )
-
-    server_parser.add_argument(
-        "--log-level",
-        type=str,
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Log level (default: INFO)",
-    )
-    server_parser.add_argument(
-        "--name",
-        type=str,
-        default="ifs-cloud-mcp-server",
-        help="Server name (default: ifs-cloud-mcp-server)",
-    )
-    server_parser.add_argument(
-        "--transport",
-        type=str,
-        default="stdio",
-        choices=["stdio"],
-        help="Transport type (default: stdio)",
-    )
-
-    # Import command
-    import_parser = subparsers.add_parser("import", help="Import IFS Cloud ZIP file")
-    import_parser.add_argument("zip_file", type=str, help="Path to IFS Cloud ZIP file")
-    import_parser.add_argument(
-        "--version",
-        type=str,
-        required=True,
-        help="Version identifier for this IFS Cloud release (e.g., '24.2.1', 'latest')",
-    )
-    import_parser.add_argument(
-        "--index-path",
-        type=str,
-        help="Custom path for index (default: auto-generated based on version)",
-    )
-    import_parser.add_argument(
-        "--log-level",
-        type=str,
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Log level (default: INFO)",
-    )
-
-    # List command
-    list_parser = subparsers.add_parser(
-        "list", help="List available IFS Cloud versions"
-    )
-    list_parser.add_argument(
-        "--json", action="store_true", help="Output in JSON format for programmatic use"
-    )
-
-    # If no command specified, default to server mode for backward compatibility
-    if len(sys.argv) == 1 or not any(
-        sys.argv[1] == cmd for cmd in ["server", "import", "list"]
-    ):
-        # Add server args directly to main parser for backward compatibility
-        index_group = parser.add_mutually_exclusive_group()
-        index_group.add_argument(
-            "--index-path",
-            type=str,
-            help="Path to store the Tantivy index (default: ./index if no version specified)",
-        )
-        index_group.add_argument(
-            "--version",
-            type=str,
-            help="IFS Cloud version to use (automatically resolves index path)",
-        )
-
-        parser.add_argument(
-            "--log-level",
-            type=str,
-            default="INFO",
-            choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-            help="Log level (default: INFO)",
-        )
-        parser.add_argument(
-            "--name",
-            type=str,
-            default="ifs-cloud-mcp-server",
-            help="Server name (default: ifs-cloud-mcp-server)",
-        )
-        parser.add_argument(
-            "--transport",
-            type=str,
-            default="stdio",
-            choices=["stdio"],
-            help="Transport type (default: stdio)",
-        )
-
-    args = parser.parse_args()
-
-    # Set up logging for non-list commands
-    if getattr(args, "command", None) != "list":
-        setup_logging(args.log_level)
-
-    # Handle commands
-    if getattr(args, "command", None) == "import":
-        return await handle_import_command(args)
-    elif getattr(args, "command", None) == "list":
-        return handle_list_command(args)
-
-    # Handle server command (default)
-    return await handle_server_command(args)
-
-
 async def handle_import_command(args) -> int:
     """Handle the import command."""
     try:
@@ -444,7 +314,7 @@ def handle_list_command(args) -> int:
         return 1
 
 
-async def handle_server_command(args) -> int:
+def handle_server_command(args) -> int:
     """Handle the server command."""
     try:
         # Determine index path
@@ -479,16 +349,83 @@ async def handle_server_command(args) -> int:
         logging.error(f"Server error: {e}")
         return 1
     finally:
-        if "server" in locals():
-            await server.cleanup()
+        if "server" in locals() and server is not None:
+            server.cleanup()
 
     return 0
 
 
 def main_sync():
     """Synchronous main entry point for console scripts."""
-    # Use asyncio.run for the main async function
-    return asyncio.run(main())
+    import argparse
+
+    # Parse arguments first to determine which command to run
+    parser = argparse.ArgumentParser(
+        description="IFS Cloud MCP Server with Tantivy search"
+    )
+
+    # Add subcommands
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Import command (requires async)
+    import_parser = subparsers.add_parser(
+        "import", help="Import IFS Cloud ZIP file and create search index"
+    )
+    import_parser.add_argument("zip_file", help="Path to IFS Cloud ZIP file")
+    import_parser.add_argument("version", help="IFS Cloud version (e.g., 25.1.0)")
+    import_parser.add_argument(
+        "--index-path", help="Custom path for search index (optional)"
+    )
+    import_parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level (default: INFO)",
+    )
+
+    # List command (synchronous)
+    list_parser = subparsers.add_parser(
+        "list", help="List available IFS Cloud versions and their index status"
+    )
+    list_parser.add_argument(
+        "--json", action="store_true", help="Output in JSON format"
+    )
+
+    # Server command (synchronous - default)
+    server_parser = subparsers.add_parser(
+        "server", help="Start the MCP server (default command)"
+    )
+    server_parser.add_argument(
+        "--version", help="IFS Cloud version to use (e.g., 25.1.0)"
+    )
+    server_parser.add_argument("--index-path", help="Path to search index")
+    server_parser.add_argument(
+        "--name", default="ifs-cloud-mcp-server", help="Server name"
+    )
+    server_parser.add_argument(
+        "--transport", default="stdio", help="Transport type (stdio, sse)"
+    )
+    server_parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level (default: INFO)",
+    )
+
+    args = parser.parse_args()
+
+    # Route to appropriate handler based on command
+    if getattr(args, "command", None) == "import":
+        # Import command requires async
+        setup_logging(args.log_level)
+        return asyncio.run(handle_import_command(args))
+    elif getattr(args, "command", None) == "list":
+        # List command is synchronous
+        return handle_list_command(args)
+    else:
+        # Server command (default) is synchronous and manages its own event loop
+        setup_logging(getattr(args, "log_level", "INFO"))
+        return handle_server_command(args)
 
 
 if __name__ == "__main__":
