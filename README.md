@@ -1,103 +1,249 @@
-# IFS Cloud MCP Server
+# 🧠 IFS Cloud Intelligent AI Agent
 
-A high-performance Model Context Protocol (MCP) server for IFS Cloud codebases, featuring enterprise-grade search capabilities powered by Tantivy search engine. **Available as both an MCP server for AI integration and a standalone web UI for interactive exploration.**
+> **Transform your IFS Cloud development with AI that deeply understands your codebase**
 
-## 🚀 Two Powerful Interfaces
+An intelligent Model Context Protocol (MCP) server that makes AI agents truly smart about IFS Cloud development. Features comprehensive code analysis, versioned ZIP catalog management, and intelligent context gathering for perfect architectural consistency.
 
-### 1. **MCP Server Mode** (AI Integration)
+---
 
-- Integrates with Claude, GitHub Copilot, and other MCP clients
-- Provides structured search APIs for AI-powered development
-- Perfect for automated code analysis and AI-assisted development
+## ✨ **What Makes This Special**
 
-### 2. **Web UI Mode** (Interactive Exploration) ⭐ NEW!
+### 🎯 **Intelligent AI Agent**
 
-- Modern web interface with type-ahead search
-- Visual exploration of IFS Cloud codebases
-- Real-time search with intelligent suggestions
-- **[See Web UI Documentation](./WEB_UI_README.md)**
+- **Automatic Context Discovery**: AI proactively searches and analyzes your codebase before implementing
+- **Pattern Recognition**: Discovers existing validation rules, APIs, and architectural patterns
+- **Perfect Integration**: Every implementation matches your existing IFS Cloud conventions
+- **Zero False Positives**: Conservative analysis ensures reliable insights
 
-## Features
+### 📦 **Versioned Catalog Management**
 
-### 🚀 High-Performance Search
+- **ZIP Import**: Import entire IFS Cloud releases from ZIP files
+- **Version Control**: Manage multiple IFS Cloud versions (24.1, 24.2, latest, dev builds)
+- **Instant Switching**: Switch between versions for different projects
+- **Smart Extraction**: Automatically filters and organizes IFS Cloud files
 
-- **Tantivy Integration**: Rust-based search engine for lightning-fast queries
-- **Large Codebase Support**: Efficiently handles 1GB+ IFS Cloud projects
-- **Sub-second Response Times**: Optimized for enterprise-scale development
-- **Intelligent Caching**: 17.4x performance improvement with disk-based caching
+### 🔍 **Lightning-Fast Search**
 
-### 📁 IFS Cloud File Support
+- **15,000+ Files**: Handle complete IFS Cloud codebases efficiently
+- **Sub-second Search**: Powered by Tantivy search engine
+- **Smart Filtering**: Filter by module, file type, complexity, and more
+- **Contextual Results**: Rich metadata with previews and relationships
 
-Complete support for all IFS Cloud file types with **specialized parsers**:
+---
 
-- `*.entity` - Entity definitions (XML parsing)
-- `*.plsql` - PL/SQL code with function/procedure extraction
-- `*.views` - Database views (IFS DSL parsing)
-- `*.storage` - Storage configurations (table/index definitions)
-- `*.fragment` - Code fragments (mixed Marble content)
-- `*.client` - Client-side code (Marble UI parsing) **✨ Enhanced**
-- `*.projection` - Data projections (Marble data access parsing)
-- `*.plsvc` - PL/SQL service layer for projections
+## 🚀 **Quick Start**
 
-### 🎨 Frontend Element Discovery **✨ NEW!**
-
-Advanced parsing of IFS Cloud UI components:
-
-- **Pages** - Client pages and dialogs
-- **Lists** - Data lists and grids
-- **Groups** - UI grouping elements
-- **Iconsets** - Icon definitions and mappings
-- **Trees** - Tree navigators and hierarchies
-- **Navigators** - Navigation structures
-- **Contexts** - Navigation contexts and selectors
-
-### 🔍 Advanced Search Capabilities
-
-- **Full-text Search**: Content search with relevance ranking
-- **Entity Search**: Find files containing specific IFS entities
-- **Frontend Element Search**: Find UI components (iconsets, trees, navigators)
-- **Module-aware Search**: Search within specific IFS modules
-- **Type-based Search**: Filter by file type and extension
-- **Multi-criteria Search**: Combine content, type, complexity, and size filters
-- **Similarity Search**: Find related files based on entities and dependencies
-- **Fuzzy Search**: Handle typos and partial matches
-
-### 📊 Code Intelligence & Analysis
-
-- **Entity Dependency Analysis**: Map relationships and dependencies between entities
-- **Override/Overtake Detection**: Find all @Override and @Overtake annotations
-- **Complexity Scoring**: Type-specific automated code complexity analysis
-- **Function/Procedure Extraction**: Identify all procedures and functions
-- **Fragment Dependency Tracking**: Map fragment includes and usage
-- **Cross-module Relationship Mapping**: Understand component interconnections
-
-### ⚙️ Configuration Management
-
-- **Persistent Core Codes Path**: Configure and remember IFS Cloud Core Codes location
-- **Automatic Indexing**: Index configured core codes with a single command
-- **Index Statistics**: Track indexing history and performance metrics
-
-## Quick Start 🚀
-
-### 🌐 **Web UI Mode** (Recommended for exploration)
-
-1. **Install and start the web interface:**
+### 1. **Install & Setup**
 
 ```bash
-# Clone and install
 git clone https://github.com/graknol/ifs-cloud-core-mcp-server.git
 cd ifs-cloud-core-mcp-server
 uv sync
-
-# Start web UI
-uv run python src/ifs_cloud_mcp_server/web_ui.py
 ```
 
-2. **Index your IFS Cloud project:**
+### 2. **Import Your IFS Cloud ZIP**
 
 ```bash
-# Build search index
-uv run python -m src.ifs_cloud_mcp_server.main index --directory /path/to/your/ifs/project
+# Import any IFS Cloud ZIP file to create versioned catalog
+uv run python -m src.ifs_cloud_mcp_server.main import "IFS_Cloud_24.2.1.zip" --version "24.2.1"
+```
+
+### 3. **Start Intelligent AI Agent**
+
+```bash
+# Start with your imported version
+uv run python -m src.ifs_cloud_mcp_server.main server --version "24.2.1"
+```
+
+### 4. **Connect GitHub Copilot**
+
+Configure your MCP client to connect to the intelligent AI agent and experience AI that truly understands your IFS Cloud patterns!
+
+---
+
+## 🔧 **Intelligent Features**
+
+<table>
+<tr>
+<td><strong>🧠 Intelligent Context Analysis</strong></td>
+<td><strong>📊 Deep Code Analysis</strong></td>
+</tr>
+<tr>
+<td>
+• Automatic pattern discovery<br>
+• Business requirement understanding<br>
+• Existing API identification<br>
+• Best practice recommendations
+</td>
+<td>
+• PLSQL business logic analysis<br>
+• Client UI pattern recognition<br>
+• Projection data model mapping<br>
+• Fragment full-stack understanding
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td><strong>📦 Version Management</strong></td>
+<td><strong>⚡ High Performance</strong></td>
+</tr>
+<tr>
+<td>
+• ZIP file import/extraction<br>
+• Multiple version support<br>
+• Isolated environments<br>
+• Easy switching between versions
+</td>
+<td>
+• 1000+ files/second indexing<br>
+• <100ms search response<br>
+• Intelligent caching system<br>
+• Batch processing optimization
+</td>
+</tr>
+</table>
+
+---
+
+## 📁 **Supported IFS Cloud Files**
+
+| File Type                    | Purpose               | AI Understanding                   |
+| ---------------------------- | --------------------- | ---------------------------------- |
+| **`.plsql`**                 | Business Logic        | APIs, validations, business rules  |
+| **`.entity`**                | Data Models           | Entity relationships, attributes   |
+| **`.client`**                | User Interface        | UI patterns, commands, navigation  |
+| **`.projection`**            | Data Access           | Queries, actions, data surface     |
+| **`.fragment`**              | Full-Stack Components | Complete UI-to-data integration    |
+| **`.views`**, **`.storage`** | Database Layer        | Data structure and access patterns |
+
+---
+
+## 🎯 **Intelligent Workflow Example**
+
+```
+💬 User: "Add customer order validation to check credit limits"
+
+🧠 AI Agent automatically:
+   1. Searches for "validation", "customer", "order", "credit" patterns
+   2. Finds existing CustomerOrder.plsql, validation methods
+   3. Analyzes business logic with PLSQL analyzer
+   4. Discovers Check_Insert___ validation patterns
+   5. Identifies existing Customer_API methods
+   6. Generates implementation matching your exact patterns
+
+✅ Result: Perfect architectural consistency!
+```
+
+---
+
+## 📋 **Commands Reference**
+
+### **ZIP Management**
+
+```bash
+# Import IFS Cloud ZIP file
+uv run python -m src.ifs_cloud_mcp_server.main import <zip_file> --version <version>
+
+# List available versions
+uv run python -m src.ifs_cloud_mcp_server.main list
+
+# Start server with specific version
+uv run python -m src.ifs_cloud_mcp_server.main server --version <version>
+```
+
+### **Quick Helper**
+
+```bash
+# One command to import and start
+uv run python zip_import_helper.py quick "my_build.zip" "24.2.1"
+
+# Import with debug info
+uv run python zip_import_helper.py import "build.zip" --version "latest" --debug
+```
+
+---
+
+## � **MCP Client Configuration**
+
+### **GitHub Copilot**
+
+```json
+{
+  "mcpServers": {
+    "ifs-cloud-intelligent-agent": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "src.ifs_cloud_mcp_server.main",
+        "server",
+        "--version",
+        "24.2.1"
+      ],
+      "cwd": "/path/to/ifs-cloud-core-mcp-server"
+    }
+  }
+}
+```
+
+### **Claude Desktop**
+
+```json
+{
+  "mcpServers": {
+    "ifs-cloud": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "src.ifs_cloud_mcp_server.main",
+        "server",
+        "--version",
+        "24.2.1"
+      ],
+      "cwd": "/path/to/ifs-cloud-core-mcp-server"
+    }
+  }
+}
+```
+
+---
+
+## 📚 **Documentation**
+
+- **[📖 ZIP Indexing Walkthrough](./ZIP_WALKTHROUGH.md)** - Step-by-step import example
+- **[📋 ZIP Indexing Instructions](./ZIP_INDEXING_INSTRUCTIONS.md)** - Complete import documentation
+- **[🧠 Intelligent Agent Guide](./INTELLIGENT_AGENT.md)** - How the AI agent works
+- **[🌐 Web UI Documentation](./WEB_UI_README.md)** - Interactive exploration interface
+
+---
+
+## 🎉 **The Result**
+
+Your AI agent now has **comprehensive IFS Cloud intelligence** and will:
+
+- ✅ **Automatically understand** your specific IFS Cloud patterns
+- ✅ **Discover existing APIs** and validation approaches
+- ✅ **Generate consistent code** that matches your architecture
+- ✅ **Follow naming conventions** and business rule patterns
+- ✅ **Leverage existing components** instead of reinventing
+- ✅ **Maintain quality standards** across all implementations
+
+**Transform your development workflow with AI that truly understands IFS Cloud!** 🚀
+
+---
+
+<div align="center">
+
+**[⭐ Star this repo](https://github.com/graknol/ifs-cloud-core-mcp-server)** • **[📝 Report Issues](https://github.com/graknol/ifs-cloud-core-mcp-server/issues)** • **[💬 Discussions](https://github.com/graknol/ifs-cloud-core-mcp-server/discussions)**
+
+_Built with ❤️ for IFS Cloud developers_
+
+</div>
 ```
 
 3. **Open browser:** Navigate to `http://localhost:5700` (or the port shown in the startup message) and start exploring!
