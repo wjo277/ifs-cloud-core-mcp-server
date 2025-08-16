@@ -34,6 +34,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "python-multipart>=0.0.20",
     "requests>=2.32.4",
+    "rapidfuzz>=3.13.0",
 ]
 
 [project.optional-dependencies]

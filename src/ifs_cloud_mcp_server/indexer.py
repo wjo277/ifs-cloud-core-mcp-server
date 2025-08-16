@@ -17,6 +17,12 @@ import aiofiles
 from pydantic import BaseModel
 
 from .parsers import IFSFileParser
+from .metadata_extractor import MetadataManager, MetadataExtract
+from .enhanced_search import (
+    MetadataEnhancedSearchEngine,
+    SearchContext,
+    SearchResult as EnhancedSearchResult,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -98,6 +104,14 @@ class IFSCloudIndexer:
         # GUI to backend navigation mappings
         self._gui_mappings: Dict[str, List[Dict[str, str]]] = {}
         self._load_gui_navigation_mappings()
+
+        # Initialize metadata system
+        metadata_dir = self.index_path / "metadata"
+        self._metadata_manager = MetadataManager(metadata_dir)
+        self._enhanced_search_engine = (
+            None  # Will be initialized when metadata is available
+        )
+        self._current_ifs_version: Optional[str] = None
 
         self._schema = self._create_schema()
         self._index = self._create_or_open_index(create_new)
@@ -2770,6 +2784,153 @@ class IFSCloudIndexer:
                 primary_entity = entities[0]
 
         return primary_entity, component
+
+    def set_ifs_version(self, ifs_version: str) -> bool:
+        """Set the IFS version for metadata enhancement"""
+        self._current_ifs_version = ifs_version
+
+        # Try to load metadata for this version
+        if self._metadata_manager.has_metadata(ifs_version):
+            if self._enhanced_search_engine is None:
+                self._enhanced_search_engine = MetadataEnhancedSearchEngine(
+                    self, self._metadata_manager
+                )
+
+            success = self._enhanced_search_engine.set_ifs_version(ifs_version)
+            if success:
+                logger.info(f"Enhanced search enabled for IFS {ifs_version}")
+            return success
+        else:
+            logger.warning(f"No metadata available for IFS {ifs_version}")
+            return False
+
+    def get_current_ifs_version(self) -> Optional[str]:
+        """Get the currently configured IFS version"""
+        return self._current_ifs_version
+
+    def has_metadata_enhancement(self) -> bool:
+        """Check if metadata enhancement is available"""
+        return (
+            self._enhanced_search_engine is not None
+            and self._enhanced_search_engine.current_metadata is not None
+        )
+
+    def get_metadata_manager(self) -> MetadataManager:
+        """Get the metadata manager for external operations"""
+        return self._metadata_manager
+
+    def get_available_ifs_versions(self) -> List[str]:
+        """Get list of IFS versions with available metadata"""
+        return self._metadata_manager.get_available_versions()
+
+    def enhanced_search(self, query: str, **kwargs) -> List[EnhancedSearchResult]:
+        """
+        Perform enhanced search with metadata integration
+
+        Args:
+            query: Search query
+            **kwargs: Additional search options (modules_filter, content_types_filter, etc.)
+
+        Returns:
+            List of enhanced search results with metadata context
+        """
+        if not self._enhanced_search_engine:
+            # Fallback to basic search
+            logger.info("Enhanced search not available - using basic search")
+            basic_results = self.search_files(query)
+
+            # Convert to enhanced format
+            enhanced_results = []
+            for result in basic_results:
+                enhanced_results.append(
+                    EnhancedSearchResult(
+                        file_path=result.path,
+                        content_type=result.type,
+                        line_number=1,
+                        snippet=result.content_preview,
+                        confidence=result.score * 100,
+                        logical_unit=result.logical_unit,
+                        module=result.module,
+                        business_description=None,
+                        related_entities=[],
+                        search_context=["Basic search - no metadata enhancement"],
+                    )
+                )
+
+            return enhanced_results
+
+        # Use enhanced search
+        context = SearchContext(
+            query=query,
+            modules_filter=kwargs.get("modules_filter"),
+            content_types_filter=kwargs.get("content_types_filter"),
+            logical_units_filter=kwargs.get("logical_units_filter"),
+            fuzzy_threshold=kwargs.get("fuzzy_threshold", 80.0),
+            include_related=kwargs.get("include_related", True),
+        )
+
+        return self._enhanced_search_engine.enhanced_search(context)
+
+    def get_module_statistics(self) -> Dict[str, Any]:
+        """Get statistics about available modules from metadata"""
+        if self._enhanced_search_engine:
+            return self._enhanced_search_engine.get_module_statistics()
+        else:
+            return {}
+
+    def suggest_related_searches(self, query: str, limit: int = 5) -> List[str]:
+        """Suggest related search terms based on metadata"""
+        if self._enhanced_search_engine:
+            return self._enhanced_search_engine.suggest_related_searches(query, limit)
+        else:
+            return []
+
+    def extract_metadata_from_mcp_results(
+        self, ifs_version: str, query_results: Dict[str, List[Dict]]
+    ) -> bool:
+        """
+        Extract and save metadata from MCP query results
+
+        Args:
+            ifs_version: IFS version identifier
+            query_results: Dictionary with MCP query results
+
+        Returns:
+            True if extraction was successful
+        """
+        try:
+            from .metadata_extractor import DatabaseMetadataExtractor
+
+            extractor = DatabaseMetadataExtractor()
+            metadata_extract = extractor.extract_from_mcp_queries(
+                ifs_version, query_results
+            )
+
+            # Save metadata
+            saved_path = self._metadata_manager.save_metadata(metadata_extract)
+            logger.info(f"Metadata saved to {saved_path}")
+
+            # Update search engine if this is the current version
+            if ifs_version == self._current_ifs_version:
+                self.set_ifs_version(ifs_version)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to extract metadata from MCP results: {e}")
+            return False
+
+    def get_metadata_extract_queries(self) -> Dict[str, str]:
+        """
+        Get the SQL queries needed for metadata extraction
+
+        Returns:
+            Dictionary of query names to SQL statements
+        """
+        from .metadata_extractor import DatabaseMetadataExtractor
+
+        extractor = DatabaseMetadataExtractor()
+        return extractor._get_default_queries()
 
     def close(self):
         """Close the indexer and release resources."""
