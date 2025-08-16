@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IFS Cloud Explorer</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: {
+                50: "#f0f9ff",
+                500: "#3b82f6",
+                600: "#2563eb",
+                700: "#1d4ed8",
+                900: "#1e3a8a",
+              },
+              dark: {
+                50: "#f8fafc",
+                100: "#f1f5f9",
+                200: "#e2e8f0",
+                300: "#cbd5e1",
+                400: "#94a3b8",
+                500: "#64748b",
+                600: "#475569",
+                700: "#334155",
+                800: "#1e293b",
+                850: "#1a2332",
+                900: "#0f172a",
+                950: "#020617",
+              },
+            },
+          },
+        },
+      };
+    </script>
+
+    <!-- Font Awesome -->
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+      rel="stylesheet"
+    />
+
+    <!-- CodeMirror CSS -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/codemirror@5.65.16/lib/codemirror.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/codemirror@5.65.16/theme/material-darker.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/codemirror@5.65.16/addon/dialog/dialog.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/codemirror@5.65.16/addon/scroll/simplescrollbars.css"
+    />
+
+    <!-- IFS Cloud Marble Dark Theme -->
+    <link rel="stylesheet" href="/static/css/codemirror-marble-dark.css" />
+
+    <!-- React with TypeScript support -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- CodeMirror JS -->
+    <script src="https://unpkg.com/codemirror@5.65.16/lib/codemirror.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/mode/sql/sql.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/mode/javascript/javascript.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/mode/xml/xml.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/mode/css/css.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/mode/clike/clike.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/addon/search/searchcursor.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/addon/search/search.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/addon/dialog/dialog.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/addon/scroll/simplescrollbars.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/addon/fold/foldcode.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/addon/fold/foldgutter.js"></script>
+    <script src="https://unpkg.com/codemirror@5.65.16/addon/fold/brace-fold.js"></script>
+
+    <!-- IFS Cloud Marble Language Mode -->
+    <script src="/static/js/codemirror-marble-mode.js"></script>
+
+    <!-- Custom CSS for dark theme enhancements -->
+    <style>
+      /* Force dark mode */
+      html {
+        background-color: #0f172a;
+      }
+
+      body {
+        background-color: #0f172a;
+        color: #e2e8f0;
+      }
+
+      /* Custom scrollbar styles */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #1e293b;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #475569;
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #64748b;
+      }
+
+      /* Enhanced search suggestion animations */
+      .search-suggestion {
+        transition: all 0.15s ease;
+      }
+
+      .search-suggestion:hover {
+        transform: translateY(-1px);
+      }
+
+      /* Result card animations */
+      .result-card {
+        transition: all 0.2s ease;
+      }
+
+      .result-card:hover {
+        transform: translateY(-2px);
+      }
+
+      /* Loading animations */
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      .animate-pulse {
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      /* Focus states for accessibility */
+      .focus-ring:focus {
+        outline: 2px solid #3b82f6;
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+
+  <body class="dark bg-dark-950 text-dark-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+      const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+      // Custom hooks and utilities
+      const useDebounce = (value, delay) => {
+        const [debouncedValue, setDebouncedValue] = useState(value);
+
+        useEffect(() => {
+          const handler = setTimeout(() => {
+            setDebouncedValue(value);
+          }, delay);
+
+          return () => {
+            clearTimeout(handler);
+          };
+        }, [value, delay]);
+
+        return debouncedValue;
+      };
+
+      const useLocalStorage = (key, defaultValue) => {
+        const [value, setValue] = useState(() => {
+          try {
+            const item = window.localStorage.getItem(key);
+            return item ? JSON.parse(item) : defaultValue;
+          } catch {
+            return defaultValue;
+          }
+        });
+
+        const setStoredValue = useCallback(
+          (value) => {
+            setValue(value);
+            try {
+              window.localStorage.setItem(key, JSON.stringify(value));
+            } catch (error) {
+              console.error(`Error saving to localStorage:`, error);
+            }
+          },
+          [key]
+        );
+
+        return [value, setStoredValue];
+      };
+
+      // API utilities
+      const searchAPI = {
+        search: async (query, filters = {}) => {
+          if (!query.trim()) return { results: [], suggestions: [] };
+
+          const params = new URLSearchParams({
+            query: query.trim(),
+            limit: filters.limit || 20,
+            ...(filters.file_type && { file_type: filters.file_type }),
+            ...(filters.module && { module: filters.module }),
+            ...(filters.logical_unit && { logical_unit: filters.logical_unit }),
+            ...(filters.min_complexity && {
+              min_complexity: filters.min_complexity,
+            }),
+            ...(filters.max_complexity && {
+              max_complexity: filters.max_complexity,
+            }),
+          });
+
+          const response = await fetch(`/api/search?${params}`);
+          if (!response.ok) throw new Error("Search failed");
+          return await response.json();
+        },
+
+        getSuggestions: async (query) => {
+          if (!query.trim() || query.length < 2) return [];
+
+          const response = await fetch(
+            `/api/suggestions?query=${encodeURIComponent(query.trim())}&limit=8`
+          );
+          if (!response.ok) return [];
+          const data = await response.json();
+          return data.suggestions || [];
+        },
+
+        getFileContent: async (path) => {
+          const response = await fetch(
+            `/api/file-content?path=${encodeURIComponent(path)}`
+          );
+          if (!response.ok) throw new Error("Failed to fetch file content");
+          return await response.json();
+        },
+      };
+
+      // Components
+      const SearchInput = ({
+        query,
+        setQuery,
+        onSearch,
+        suggestions,
+        isLoading,
+      }) => {
+        const [isFocused, setIsFocused] = useState(false);
+        const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
+        const inputRef = useRef();
+
+        const handleKeyDown = (e) => {
+          if (suggestions.length === 0) return;
+
+          switch (e.key) {
+            case "ArrowDown":
+              e.preventDefault();
+              setSelectedSuggestion((prev) =>
+                prev < suggestions.length - 1 ? prev + 1 : 0
+              );
+              break;
+            case "ArrowUp":
+              e.preventDefault();
+              setSelectedSuggestion((prev) =>
+                prev > 0 ? prev - 1 : suggestions.length - 1
+              );
+              break;
+            case "Enter":
+              if (selectedSuggestion >= 0) {
+                e.preventDefault();
+                setQuery(suggestions[selectedSuggestion].text);
+                setIsFocused(false);
+              }
+              break;
+            case "Escape":
+              setIsFocused(false);
+              inputRef.current?.blur();
+              break;
+          }
+        };
+
+        const selectSuggestion = (suggestion) => {
+          setQuery(suggestion.text);
+          setIsFocused(false);
+          inputRef.current?.focus();
+        };
+
+        return (
+          <div className="relative w-full max-w-4xl">
+            <div className="relative">
+              <i className="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-dark-400"></i>
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setTimeout(() => setIsFocused(false), 200)}
+                onKeyDown={handleKeyDown}
+                placeholder="Search IFS Cloud files... (entity names, functions, patterns)"
+                className="w-full pl-12 pr-12 py-4 bg-dark-800 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none transition-all duration-200"
+                autoComplete="off"
+              />
+              {isLoading && (
+                <i className="fas fa-spinner fa-spin absolute right-4 top-1/2 transform -translate-y-1/2 text-dark-400"></i>
+              )}
+            </div>
+
+            {/* Suggestions dropdown */}
+            {isFocused && suggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-dark-800 border border-dark-600 rounded-lg shadow-2xl z-50 max-h-80 overflow-y-auto">
+                {suggestions.map((suggestion, index) => (
+                  <div
+                    key={index}
+                    className={`search-suggestion px-4 py-3 cursor-pointer border-b border-dark-700 last:border-b-0 ${
+                      index === selectedSuggestion
+                        ? "bg-primary-500/20 border-primary-500/30"
+                        : "hover:bg-dark-700"
+                    }`}
+                    onClick={() => selectSuggestion(suggestion)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <i
+                          className={`fas ${getSuggestionIcon(
+                            suggestion.type
+                          )} text-${getSuggestionColor(suggestion.type)}-400`}
+                        ></i>
+                        <div>
+                          <div className="font-medium text-white">
+                            {suggestion.text}
+                          </div>
+                          <div className="text-sm text-dark-400">
+                            {suggestion.context}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-dark-500 font-mono">
+                        {suggestion.type}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      const FilterPanel = ({ filters, setFilters, isOpen, setIsOpen }) => {
+        const fileTypes = [
+          {
+            value: ".entity",
+            label: "Entity",
+            icon: "fa-database",
+            color: "blue",
+          },
+          { value: ".plsql", label: "PL/SQL", icon: "fa-code", color: "green" },
+          {
+            value: ".client",
+            label: "Client",
+            icon: "fa-desktop",
+            color: "purple",
+          },
+          {
+            value: ".projection",
+            label: "Projection",
+            icon: "fa-layer-group",
+            color: "orange",
+          },
+          {
+            value: ".fragment",
+            label: "Fragment",
+            icon: "fa-puzzle-piece",
+            color: "pink",
+          },
+          { value: ".views", label: "Views", icon: "fa-eye", color: "cyan" },
+        ];
+
+        return (
+          <div
+            className={`transition-all duration-300 overflow-hidden ${
+              isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+            }`}
+          >
+            <div className="bg-dark-800 border border-dark-600 rounded-lg p-6 space-y-6">
+              {/* File Types */}
+              <div>
+                <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                  <i className="fas fa-filter mr-2"></i>
+                  File Types
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {fileTypes.map((type) => (
+                    <button
+                      key={type.value}
+                      onClick={() =>
+                        setFilters((prev) => ({
+                          ...prev,
+                          file_type:
+                            prev.file_type === type.value ? "" : type.value,
+                        }))
+                      }
+                      className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm transition-all ${
+                        filters.file_type === type.value
+                          ? `bg-${type.color}-500/20 text-${type.color}-300 border border-${type.color}-500/30`
+                          : "bg-dark-700 text-dark-300 hover:bg-dark-600 border border-transparent"
+                      }`}
+                    >
+                      <i className={`fas ${type.icon} text-xs`}></i>
+                      <span>{type.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Complexity Range */}
+              <div>
+                <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                  <i className="fas fa-chart-line mr-2"></i>
+                  Complexity Range
+                </h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-dark-400 mb-1">
+                      Min
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={filters.min_complexity || ""}
+                      onChange={(e) =>
+                        setFilters((prev) => ({
+                          ...prev,
+                          min_complexity: e.target.value
+                            ? parseFloat(e.target.value)
+                            : null,
+                        }))
+                      }
+                      className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded text-sm text-white focus:border-primary-500 focus:outline-none"
+                      placeholder="0.0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-dark-400 mb-1">
+                      Max
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={filters.max_complexity || ""}
+                      onChange={(e) =>
+                        setFilters((prev) => ({
+                          ...prev,
+                          max_complexity: e.target.value
+                            ? parseFloat(e.target.value)
+                            : null,
+                        }))
+                      }
+                      className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded text-sm text-white focus:border-primary-500 focus:outline-none"
+                      placeholder="1.0"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Module Filter */}
+              <div>
+                <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                  <i className="fas fa-cube mr-2"></i>
+                  Module
+                </h3>
+                <input
+                  type="text"
+                  value={filters.module || ""}
+                  onChange={(e) =>
+                    setFilters((prev) => ({ ...prev, module: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded text-sm text-white focus:border-primary-500 focus:outline-none"
+                  placeholder="e.g., ORDER, FINANCE, PROJECT"
+                />
+              </div>
+
+              {/* Clear Filters */}
+              <button
+                onClick={() => setFilters({})}
+                className="w-full px-4 py-2 bg-dark-700 hover:bg-dark-600 text-dark-200 rounded-md text-sm transition-colors flex items-center justify-center space-x-2"
+              >
+                <i className="fas fa-times"></i>
+                <span>Clear All Filters</span>
+              </button>
+            </div>
+          </div>
+        );
+      };
+
+      const SearchResult = ({ result, onSelect, isSelected }) => {
+        const getFileIcon = (path) => {
+          if (path.endsWith(".entity"))
+            return { icon: "fa-database", color: "blue" };
+          if (path.endsWith(".plsql"))
+            return { icon: "fa-code", color: "green" };
+          if (path.endsWith(".client"))
+            return { icon: "fa-desktop", color: "purple" };
+          if (path.endsWith(".projection"))
+            return { icon: "fa-layer-group", color: "orange" };
+          if (path.endsWith(".fragment"))
+            return { icon: "fa-puzzle-piece", color: "pink" };
+          if (path.endsWith(".views")) return { icon: "fa-eye", color: "cyan" };
+          return { icon: "fa-file", color: "gray" };
+        };
+
+        const { icon, color } = getFileIcon(result.path);
+        const fileName = result.path.split("/").pop();
+        const filePath = result.path.replace(fileName, "");
+
+        return (
+          <div
+            className={`result-card bg-dark-800 border rounded-lg p-4 cursor-pointer transition-all duration-200 hover:shadow-lg relative ${
+              isSelected
+                ? "border-primary-500 bg-primary-500/10"
+                : "border-dark-600 hover:border-primary-500/50"
+            }`}
+            onClick={() => onSelect(result)}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center space-x-3 min-w-0 flex-1">
+                <i className={`fas ${icon} text-${color}-400 text-lg flex-shrink-0`}></i>
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-semibold text-white text-base truncate">
+                    {fileName}
+                  </h3>
+                  <p className="text-dark-400 text-xs font-mono truncate">
+                    {filePath}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right flex-shrink-0 ml-3">
+                <div className="text-sm text-primary-400 font-medium">
+                  {result.score.toFixed(1)}
+                </div>
+                {result.line_count && (
+                  <div className="text-xs text-dark-400">
+                    {result.line_count.toLocaleString()} lines
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Essential metadata tags */}
+            <div className="flex flex-wrap gap-1 mb-3">
+              {result.module && (
+                <span className="px-2 py-1 bg-blue-500/20 text-blue-300 text-xs rounded-full border border-blue-500/30">
+                  {result.module}
+                </span>
+              )}
+              {result.logical_unit && (
+                <span className="px-2 py-1 bg-purple-500/20 text-purple-300 text-xs rounded-full border border-purple-500/30">
+                  {result.logical_unit}
+                </span>
+              )}
+              {result.entities?.length > 0 && (
+                <span className="px-2 py-1 bg-green-500/20 text-green-300 text-xs rounded-full border border-green-500/30">
+                  {result.entities.length} entities
+                </span>
+              )}
+              {result.functions?.length > 0 && (
+                <span className="px-2 py-1 bg-yellow-500/20 text-yellow-300 text-xs rounded-full border border-yellow-500/30">
+                  {result.functions.length} functions
+                </span>
+              )}
+            </div>
+
+            {/* Compact preview */}
+            {(result.highlight || result.content_preview) && (
+              <div className="bg-dark-900 rounded border border-dark-700 p-2">
+                <pre
+                  className="text-xs text-dark-300 overflow-hidden whitespace-pre-wrap line-clamp-3"
+                  dangerouslySetInnerHTML={ {
+                    __html: result.highlight
+                      ? result.highlight
+                          .replace(
+                            /<mark>/g,
+                            '<mark class="bg-yellow-400/30 text-yellow-200">'
+                          )
+                          .substring(0, 150)
+                      : result.content_preview?.substring(0, 150) + "..." ||
+                        "",
+                  } }
+                />
+              </div>
+            )}
+
+            {/* Selection indicator */}
+            {isSelected && (
+              <div className="absolute top-2 right-2">
+                <i className="fas fa-chevron-right text-primary-400 text-sm"></i>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+        return (
+          <div
+            className="result-card bg-dark-800 border border-dark-600 rounded-lg p-6 cursor-pointer hover:border-primary-500/50 hover:shadow-lg transition-all duration-200"
+            onClick={() => onClick(result)}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center space-x-3">
+                <i className={`fas ${icon} text-${color}-400 text-lg`}></i>
+                <div>
+                  <h3 className="font-semibold text-white text-lg">
+                    {fileName}
+                  </h3>
+                  <p className="text-dark-400 text-sm font-mono">{filePath}</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <div className="text-right">
+                  <div className="text-sm text-primary-400 font-medium">
+                    Score: {result.score.toFixed(2)}
+                  </div>
+                  {result.complexity_score !== undefined && (
+                    <div className="text-xs text-dark-400">
+                      Complexity: {result.complexity_score.toFixed(3)}
+                    </div>
+                  )}
+                  {result.line_count && (
+                    <div className="text-xs text-dark-400">
+                      Lines: {result.line_count.toLocaleString()}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Enhanced Metadata Section */}
+            <div className="space-y-3 mb-4">
+              {/* Primary metadata row */}
+              <div className="flex flex-wrap gap-2">
+                {result.module && (
+                  <span className="px-2 py-1 bg-blue-500/20 text-blue-300 text-xs rounded-full border border-blue-500/30 flex items-center">
+                    <i className="fas fa-cube mr-1 text-xs"></i>
+                    {result.module}
+                  </span>
+                )}
+                {result.logical_unit && (
+                  <span className="px-2 py-1 bg-purple-500/20 text-purple-300 text-xs rounded-full border border-purple-500/30 flex items-center">
+                    <i className="fas fa-sitemap mr-1 text-xs"></i>
+                    {result.logical_unit}
+                  </span>
+                )}
+                {result.component && (
+                  <span className="px-2 py-1 bg-orange-500/20 text-orange-300 text-xs rounded-full border border-orange-500/30 flex items-center">
+                    <i className="fas fa-puzzle-piece mr-1 text-xs"></i>
+                    {result.component}
+                  </span>
+                )}
+                {result.modified_time && (
+                  <span className="px-2 py-1 bg-gray-500/20 text-gray-300 text-xs rounded-full border border-gray-500/30 flex items-center">
+                    <i className="fas fa-clock mr-1 text-xs"></i>
+                    {formatDate(result.modified_time)}
+                  </span>
+                )}
+              </div>
+
+              {/* Entities row */}
+              {result.entities?.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  <span className="text-xs text-dark-400 mr-2 flex items-center">
+                    <i className="fas fa-database mr-1"></i>
+                    Entities:
+                  </span>
+                  {result.entities.map((entity) => (
+                    <span
+                      key={entity}
+                      className="px-2 py-1 bg-green-500/20 text-green-300 text-xs rounded border border-green-500/30"
+                    >
+                      {entity}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Functions row */}
+              {result.functions?.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  <span className="text-xs text-dark-400 mr-2 flex items-center">
+                    <i className="fas fa-code mr-1"></i>
+                    Functions:
+                  </span>
+                  {result.functions.slice(0, 5).map((func) => (
+                    <span
+                      key={func}
+                      className="px-2 py-1 bg-yellow-500/20 text-yellow-300 text-xs rounded border border-yellow-500/30"
+                    >
+                      {func}
+                    </span>
+                  ))}
+                  {result.functions.length > 5 && (
+                    <span className="px-2 py-1 bg-dark-600 text-dark-300 text-xs rounded">
+                      +{result.functions.length - 5} more
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* UI Elements row */}
+              {(result.pages?.length > 0 ||
+                result.lists?.length > 0 ||
+                result.groups?.length > 0 ||
+                result.entitysets?.length > 0 ||
+                result.trees?.length > 0 ||
+                result.navigators?.length > 0) && (
+                <div className="flex flex-wrap gap-1">
+                  <span className="text-xs text-dark-400 mr-2 flex items-center">
+                    <i className="fas fa-desktop mr-1"></i>
+                    UI Elements:
+                  </span>
+                  {result.pages?.slice(0, 3).map((page) => (
+                    <span
+                      key={page}
+                      className="px-2 py-1 bg-pink-500/20 text-pink-300 text-xs rounded border border-pink-500/30"
+                    >
+                      📄 {page}
+                    </span>
+                  ))}
+                  {result.lists?.slice(0, 3).map((list) => (
+                    <span
+                      key={list}
+                      className="px-2 py-1 bg-cyan-500/20 text-cyan-300 text-xs rounded border border-cyan-500/30"
+                    >
+                      📋 {list}
+                    </span>
+                  ))}
+                  {result.groups?.slice(0, 3).map((group) => (
+                    <span
+                      key={group}
+                      className="px-2 py-1 bg-indigo-500/20 text-indigo-300 text-xs rounded border border-indigo-500/30"
+                    >
+                      📁 {group}
+                    </span>
+                  ))}
+                  {result.trees?.slice(0, 3).map((tree) => (
+                    <span
+                      key={tree}
+                      className="px-2 py-1 bg-emerald-500/20 text-emerald-300 text-xs rounded border border-emerald-500/30"
+                    >
+                      🌳 {tree}
+                    </span>
+                  ))}
+                  {result.navigators?.slice(0, 3).map((nav) => (
+                    <span
+                      key={nav}
+                      className="px-2 py-1 bg-violet-500/20 text-violet-300 text-xs rounded border border-violet-500/30"
+                    >
+                      🧭 {nav}
+                    </span>
+                  ))}
+                  {/* Show count of remaining UI elements */}
+                  {(() => {
+                    const totalShown =
+                      (result.pages?.slice(0, 3).length || 0) +
+                      (result.lists?.slice(0, 3).length || 0) +
+                      (result.groups?.slice(0, 3).length || 0) +
+                      (result.trees?.slice(0, 3).length || 0) +
+                      (result.navigators?.slice(0, 3).length || 0);
+                    const totalRemaining =
+                      (result.pages?.length || 0) +
+                      (result.lists?.length || 0) +
+                      (result.groups?.length || 0) +
+                      (result.trees?.length || 0) +
+                      (result.navigators?.length || 0) -
+                      totalShown;
+                    return totalRemaining > 0 ? (
+                      <span className="px-2 py-1 bg-dark-600 text-dark-300 text-xs rounded">
+                        +{totalRemaining} more UI elements
+                      </span>
+                    ) : null;
+                  })()}
+                </div>
+              )}
+
+              {/* Tags row */}
+              {result.tags?.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  <span className="text-xs text-dark-400 mr-2 flex items-center">
+                    <i className="fas fa-tags mr-1"></i>
+                    Tags:
+                  </span>
+                  {result.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="px-2 py-1 bg-slate-500/20 text-slate-300 text-xs rounded border border-slate-500/30"
+                    >
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Enhanced Preview - use highlight if available, otherwise content_preview */}
+            {(result.highlight || result.content_preview) && (
+              <div className="bg-dark-900 rounded border border-dark-700 p-3">
+                <pre
+                  className="text-xs text-dark-300 overflow-x-auto whitespace-pre-wrap"
+                  dangerouslySetInnerHTML={ {
+                    __html: result.highlight
+                      ? result.highlight.replace(
+                          /<mark>/g,
+                          '<mark class="bg-yellow-400/30 text-yellow-200">'
+                        )
+                      : result.content_preview?.substring(0, 200) + "..." || "",
+                  } }
+                />
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      const DetailSidebar = ({ result, isOpen, onClose, onViewFile }) => {
+        const formatDate = (dateStr) => {
+          if (!dateStr) return null;
+          try {
+            return new Date(dateStr).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            });
+          } catch {
+            return dateStr;
+          }
+        };
+
+        const getFileIcon = (path) => {
+          if (path.endsWith(".entity"))
+            return { icon: "fa-database", color: "blue" };
+          if (path.endsWith(".plsql"))
+            return { icon: "fa-code", color: "green" };
+          if (path.endsWith(".client"))
+            return { icon: "fa-desktop", color: "purple" };
+          if (path.endsWith(".projection"))
+            return { icon: "fa-layer-group", color: "orange" };
+          if (path.endsWith(".fragment"))
+            return { icon: "fa-puzzle-piece", color: "pink" };
+          if (path.endsWith(".views")) return { icon: "fa-eye", color: "cyan" };
+          return { icon: "fa-file", color: "gray" };
+        };
+
+        if (!result) return null;
+
+        const { icon, color } = getFileIcon(result.path);
+        const fileName = result.path.split("/").pop();
+        const filePath = result.path.replace(fileName, "");
+
+        return (
+          <div
+            className={`fixed top-0 right-0 h-full w-96 bg-dark-900 border-l border-dark-600 shadow-2xl transform transition-transform duration-300 z-40 ${
+              isOpen ? "translate-x-0" : "translate-x-full"
+            }`}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-dark-700">
+              <div className="flex items-center space-x-3">
+                <i className={`fas ${icon} text-${color}-400 text-lg`}></i>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-lg font-semibold text-white truncate">
+                    {fileName}
+                  </h2>
+                  <p className="text-sm text-dark-400 font-mono truncate">
+                    {filePath}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className="p-2 hover:bg-dark-700 rounded-lg transition-colors"
+              >
+                <i className="fas fa-times text-dark-400"></i>
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+              {/* Quick Stats */}
+              <div className="bg-dark-800 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                  <i className="fas fa-chart-bar mr-2"></i>
+                  File Statistics
+                </h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <div className="text-dark-400">Score</div>
+                    <div className="text-primary-400 font-medium">
+                      {result.score.toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-dark-400">Lines</div>
+                    <div className="text-white">
+                      {result.line_count?.toLocaleString() || "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-dark-400">Complexity</div>
+                    <div className="text-white">
+                      {result.complexity_score?.toFixed(3) || "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-dark-400">Modified</div>
+                    <div className="text-white text-xs">
+                      {formatDate(result.modified_time) || "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Core Metadata */}
+              <div className="bg-dark-800 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                  <i className="fas fa-tag mr-2"></i>
+                  Metadata
+                </h3>
+                <div className="space-y-2 text-sm">
+                  {result.module && (
+                    <div className="flex justify-between">
+                      <span className="text-dark-400">Module</span>
+                      <span className="text-blue-300 font-medium">
+                        {result.module}
+                      </span>
+                    </div>
+                  )}
+                  {result.logical_unit && (
+                    <div className="flex justify-between">
+                      <span className="text-dark-400">Logical Unit</span>
+                      <span className="text-purple-300 font-medium">
+                        {result.logical_unit}
+                      </span>
+                    </div>
+                  )}
+                  {result.component && (
+                    <div className="flex justify-between">
+                      <span className="text-dark-400">Component</span>
+                      <span className="text-orange-300 font-medium">
+                        {result.component}
+                      </span>
+                    </div>
+                  )}
+                  {result.entity_name && (
+                    <div className="flex justify-between">
+                      <span className="text-dark-400">Primary Entity</span>
+                      <span className="text-green-300 font-medium">
+                        {result.entity_name}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Entities */}
+              {result.entities?.length > 0 && (
+                <div className="bg-dark-800 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                    <i className="fas fa-database mr-2"></i>
+                    Entities ({result.entities.length})
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {result.entities.map((entity) => (
+                      <span
+                        key={entity}
+                        className="px-2 py-1 bg-green-500/20 text-green-300 text-xs rounded border border-green-500/30"
+                      >
+                        {entity}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Functions */}
+              {result.functions?.length > 0 && (
+                <div className="bg-dark-800 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                    <i className="fas fa-code mr-2"></i>
+                    Functions ({result.functions.length})
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {result.functions.map((func) => (
+                      <span
+                        key={func}
+                        className="px-2 py-1 bg-yellow-500/20 text-yellow-300 text-xs rounded border border-yellow-500/30"
+                      >
+                        {func}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* UI Elements */}
+              {(result.pages?.length > 0 ||
+                result.lists?.length > 0 ||
+                result.groups?.length > 0 ||
+                result.entitysets?.length > 0 ||
+                result.trees?.length > 0 ||
+                result.navigators?.length > 0) && (
+                <div className="bg-dark-800 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                    <i className="fas fa-desktop mr-2"></i>
+                    UI Elements
+                  </h3>
+                  <div className="space-y-3">
+                    {result.pages?.length > 0 && (
+                      <div>
+                        <div className="text-xs text-dark-400 mb-1">
+                          Pages ({result.pages.length})
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {result.pages.map((page) => (
+                            <span
+                              key={page}
+                              className="px-2 py-1 bg-pink-500/20 text-pink-300 text-xs rounded border border-pink-500/30"
+                            >
+                              📄 {page}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {result.lists?.length > 0 && (
+                      <div>
+                        <div className="text-xs text-dark-400 mb-1">
+                          Lists ({result.lists.length})
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {result.lists.map((list) => (
+                            <span
+                              key={list}
+                              className="px-2 py-1 bg-cyan-500/20 text-cyan-300 text-xs rounded border border-cyan-500/30"
+                            >
+                              📋 {list}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {result.groups?.length > 0 && (
+                      <div>
+                        <div className="text-xs text-dark-400 mb-1">
+                          Groups ({result.groups.length})
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {result.groups.map((group) => (
+                            <span
+                              key={group}
+                              className="px-2 py-1 bg-indigo-500/20 text-indigo-300 text-xs rounded border border-indigo-500/30"
+                            >
+                              📁 {group}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {result.trees?.length > 0 && (
+                      <div>
+                        <div className="text-xs text-dark-400 mb-1">
+                          Trees ({result.trees.length})
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {result.trees.map((tree) => (
+                            <span
+                              key={tree}
+                              className="px-2 py-1 bg-emerald-500/20 text-emerald-300 text-xs rounded border border-emerald-500/30"
+                            >
+                              🌳 {tree}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {result.navigators?.length > 0 && (
+                      <div>
+                        <div className="text-xs text-dark-400 mb-1">
+                          Navigators ({result.navigators.length})
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {result.navigators.map((nav) => (
+                            <span
+                              key={nav}
+                              className="px-2 py-1 bg-violet-500/20 text-violet-300 text-xs rounded border border-violet-500/30"
+                            >
+                              🧭 {nav}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Tags */}
+              {result.tags?.length > 0 && (
+                <div className="bg-dark-800 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                    <i className="fas fa-tags mr-2"></i>
+                    Tags ({result.tags.length})
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {result.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="px-2 py-1 bg-slate-500/20 text-slate-300 text-xs rounded border border-slate-500/30"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview */}
+              {(result.highlight || result.content_preview) && (
+                <div className="bg-dark-800 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-dark-200 mb-3 flex items-center">
+                    <i className="fas fa-eye mr-2"></i>
+                    Preview
+                  </h3>
+                  <div className="bg-dark-900 rounded border border-dark-700 p-3">
+                    <pre
+                      className="text-xs text-dark-300 overflow-x-auto whitespace-pre-wrap"
+                      dangerouslySetInnerHTML={ {
+                        __html: result.highlight
+                          ? result.highlight.replace(
+                              /<mark>/g,
+                              '<mark class="bg-yellow-400/30 text-yellow-200">'
+                            )
+                          : result.content_preview || "",
+                      } }
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Actions */}
+            <div className="border-t border-dark-700 p-4">
+              <button
+                onClick={() => onViewFile(result)}
+                className="w-full px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center"
+              >
+                <i className="fas fa-external-link-alt mr-2"></i>
+                View Full File
+              </button>
+            </div>
+          </div>
+        );
+      };
+
+      const FileViewer = ({ result, onClose }) => {
+        const [content, setContent] = useState(null);
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState(null);
+        const editorRef = useRef();
+
+        useEffect(() => {
+          const fetchContent = async () => {
+            try {
+              setLoading(true);
+              setError(null);
+              const data = await searchAPI.getFileContent(result.path);
+              setContent(data.content);
+            } catch (err) {
+              setError(err.message);
+            } finally {
+              setLoading(false);
+            }
+          };
+
+          if (result) {
+            fetchContent();
+          }
+        }, [result]);
+
+        useEffect(() => {
+          if (content && editorRef.current) {
+            // Determine CodeMirror mode based on file extension
+            let mode = "text";
+            if (result.path.endsWith(".plsql")) mode = "sql";
+            else if (
+              result.path.endsWith(".client") ||
+              result.path.endsWith(".projection") ||
+              result.path.endsWith(".fragment")
+            )
+              mode = "marble";
+            else if (result.path.endsWith(".entity")) mode = "marble";
+            else if (result.path.endsWith(".views")) mode = "sql";
+
+            const editor = CodeMirror(editorRef.current, {
+              value: content,
+              mode: mode,
+              theme: "marble-dark",
+              lineNumbers: true,
+              readOnly: true,
+              scrollbarStyle: "simple",
+              foldGutter: true,
+              gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+              extraKeys: {
+                "Ctrl-F": "findPersistent",
+                "Ctrl-G": "findNext",
+                "Shift-Ctrl-G": "findPrev",
+              },
+            });
+
+            // Clean up on unmount
+            return () => {
+              if (editor && editor.getWrapperElement().parentNode) {
+                editor.getWrapperElement().remove();
+              }
+            };
+          }
+        }, [content, result]);
+
+        if (!result) return null;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div className="bg-dark-900 border border-dark-600 rounded-lg w-full max-w-6xl max-h-[90vh] flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between p-4 border-b border-dark-700">
+                <div className="flex items-center space-x-3">
+                  <i
+                    className={`fas ${getFileIcon(result.path).icon} text-${
+                      getFileIcon(result.path).color
+                    }-400`}
+                  ></i>
+                  <div>
+                    <h2 className="text-lg font-semibold text-white">
+                      {result.path.split("/").pop()}
+                    </h2>
+                    <p className="text-sm text-dark-400 font-mono">
+                      {result.path}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={onClose}
+                  className="p-2 hover:bg-dark-700 rounded-lg transition-colors focus-ring"
+                >
+                  <i className="fas fa-times text-dark-400"></i>
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 min-h-0 p-4">
+                {loading && (
+                  <div className="flex items-center justify-center h-64">
+                    <div className="animate-pulse text-dark-400">
+                      <i className="fas fa-spinner fa-spin text-2xl"></i>
+                      <p className="mt-2">Loading file content...</p>
+                    </div>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="flex items-center justify-center h-64 text-red-400">
+                    <div className="text-center">
+                      <i className="fas fa-exclamation-triangle text-2xl mb-2"></i>
+                      <p>Error loading file: {error}</p>
+                    </div>
+                  </div>
+                )}
+
+                {content && (
+                  <div
+                    ref={editorRef}
+                    className="w-full h-full border border-dark-700 rounded"
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // Main App Component
+      const App = () => {
+        const [query, setQuery] = useState("");
+        const [results, setResults] = useState([]);
+        const [suggestions, setSuggestions] = useState([]);
+        const [filters, setFilters] = useLocalStorage("searchFilters", {});
+        const [filtersOpen, setFiltersOpen] = useState(false);
+        const [selectedResult, setSelectedResult] = useState(null);
+        const [detailSidebarOpen, setDetailSidebarOpen] = useState(false);
+        const [fileViewerResult, setFileViewerResult] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState(null);
+
+        const debouncedQuery = useDebounce(query, 300);
+        const debouncedSuggestions = useDebounce(query, 150);
+
+        // Search effect
+        useEffect(() => {
+          const performSearch = async () => {
+            if (!debouncedQuery.trim()) {
+              setResults([]);
+              return;
+            }
+
+            try {
+              setLoading(true);
+              setError(null);
+              const data = await searchAPI.search(debouncedQuery, filters);
+              setResults(data.results || []);
+            } catch (err) {
+              setError(err.message);
+              setResults([]);
+            } finally {
+              setLoading(false);
+            }
+          };
+
+          performSearch();
+        }, [debouncedQuery, filters]);
+
+        // Suggestions effect
+        useEffect(() => {
+          const getSuggestions = async () => {
+            try {
+              const suggestions = await searchAPI.getSuggestions(
+                debouncedSuggestions
+              );
+              setSuggestions(suggestions);
+            } catch (err) {
+              setSuggestions([]);
+            }
+          };
+
+          getSuggestions();
+        }, [debouncedSuggestions]);
+
+        const activeFilterCount = Object.values(filters).filter(
+          (v) => v != null && v !== ""
+        ).length;
+
+        const handleSelectResult = (result) => {
+          setSelectedResult(result);
+          setDetailSidebarOpen(true);
+        };
+
+        const handleCloseSidebar = () => {
+          setDetailSidebarOpen(false);
+          setTimeout(() => setSelectedResult(null), 300); // Wait for animation
+        };
+
+        const handleViewFile = (result) => {
+          setFileViewerResult(result);
+          setDetailSidebarOpen(false);
+        };
+
+        return (
+          <div className="min-h-screen bg-dark-950">
+            {/* Header */}
+            <header className="bg-dark-900 border-b border-dark-700">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-3">
+                      <i className="fas fa-search text-primary-500 text-2xl"></i>
+                      <h1 className="text-2xl font-bold text-white">
+                        IFS Cloud Explorer
+                      </h1>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setFiltersOpen(!filtersOpen)}
+                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all duration-200 focus-ring ${
+                      filtersOpen || activeFilterCount > 0
+                        ? "bg-primary-500/20 text-primary-300 border border-primary-500/30"
+                        : "bg-dark-800 text-dark-300 hover:bg-dark-700 border border-dark-600"
+                    }`}
+                  >
+                    <i className="fas fa-sliders-h"></i>
+                    <span>Filters</span>
+                    {activeFilterCount > 0 && (
+                      <span className="bg-primary-500 text-white text-xs px-2 py-0.5 rounded-full">
+                        {activeFilterCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
+
+                <SearchInput
+                  query={query}
+                  setQuery={setQuery}
+                  suggestions={suggestions}
+                  isLoading={loading}
+                />
+              </div>
+
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <FilterPanel
+                  filters={filters}
+                  setFilters={setFilters}
+                  isOpen={filtersOpen}
+                  setIsOpen={setFiltersOpen}
+                />
+              </div>
+            </header>
+
+            {/* Main Content */}
+            <main className={`transition-all duration-300 ${
+              detailSidebarOpen ? 'mr-96' : ''
+            } max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8`}>
+              {error && (
+                <div className="bg-red-500/20 border border-red-500/30 text-red-300 px-4 py-3 rounded-lg mb-6 flex items-center">
+                  <i className="fas fa-exclamation-triangle mr-3"></i>
+                  Error: {error}
+                </div>
+              )}
+
+              {loading && (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-pulse text-dark-400 text-center">
+                    <i className="fas fa-spinner fa-spin text-3xl mb-4"></i>
+                    <p>Searching IFS Cloud files...</p>
+                  </div>
+                </div>
+              )}
+
+              {!loading && results.length === 0 && query.trim() && (
+                <div className="text-center py-12 text-dark-400">
+                  <i className="fas fa-search text-4xl mb-4"></i>
+                  <p className="text-lg">No results found for "{query}"</p>
+                  <p className="text-sm mt-2">
+                    Try adjusting your search terms or filters
+                  </p>
+                </div>
+              )}
+
+              {!loading && results.length === 0 && !query.trim() && (
+                <div className="text-center py-12 text-dark-400">
+                  <i className="fas fa-code text-4xl mb-4"></i>
+                  <p className="text-lg">Welcome to IFS Cloud Explorer</p>
+                  <p className="text-sm mt-2">
+                    Start typing to search through IFS Cloud files, entities,
+                    and patterns
+                  </p>
+                </div>
+              )}
+
+              {results.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-6">
+                    <p className="text-dark-400">
+                      Found {results.length} result
+                      {results.length !== 1 ? "s" : ""} for "{query}"
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {results.map((result, index) => (
+                      <SearchResult
+                        key={index}
+                        result={result}
+                        onSelect={handleSelectResult}
+                        isSelected={selectedResult?.path === result.path}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </main>
+
+            {/* Detail Sidebar */}
+            <DetailSidebar
+              result={selectedResult}
+              isOpen={detailSidebarOpen}
+              onClose={handleCloseSidebar}
+              onViewFile={handleViewFile}
+            />
+
+            {/* File Viewer Modal */}
+            {fileViewerResult && (
+              <FileViewer
+                result={fileViewerResult}
+                onClose={() => setFileViewerResult(null)}
+              />
+            )}
+
+            {/* Overlay for sidebar */}
+            {detailSidebarOpen && (
+              <div
+                className="fixed inset-0 bg-black/20 z-30"
+                onClick={handleCloseSidebar}
+              />
+            )}
+          </div>
+        );
+      };
+          </div>
+        );
+      };
+
+      // Utility functions
+      const getSuggestionIcon = (type) => {
+        switch (type) {
+          case "entity":
+            return "fa-database";
+          case "function":
+            return "fa-code";
+          case "module":
+            return "fa-cube";
+          case "file":
+            return "fa-file";
+          case "frontend":
+            return "fa-desktop";
+          default:
+            return "fa-search";
+        }
+      };
+
+      const getSuggestionColor = (type) => {
+        switch (type) {
+          case "entity":
+            return "blue";
+          case "function":
+            return "green";
+          case "module":
+            return "purple";
+          case "file":
+            return "gray";
+          case "frontend":
+            return "orange";
+          default:
+            return "gray";
+        }
+      };
+
+      const getFileIcon = (path) => {
+        if (path.endsWith(".entity"))
+          return { icon: "fa-database", color: "blue" };
+        if (path.endsWith(".plsql")) return { icon: "fa-code", color: "green" };
+        if (path.endsWith(".client"))
+          return { icon: "fa-desktop", color: "purple" };
+        if (path.endsWith(".projection"))
+          return { icon: "fa-layer-group", color: "orange" };
+        if (path.endsWith(".fragment"))
+          return { icon: "fa-puzzle-piece", color: "pink" };
+        if (path.endsWith(".views")) return { icon: "fa-eye", color: "cyan" };
+        return { icon: "fa-file", color: "gray" };
+      };
+
+      // Render the app
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<App />);
+    </script>
+  </body>
+</html>

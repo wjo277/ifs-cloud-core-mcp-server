@@ -82,6 +82,8 @@ class IFSCloudSearchEngine:
         file_type: Optional[str] = None,
         min_complexity: Optional[float] = None,
         max_complexity: Optional[float] = None,
+        module: Optional[str] = None,
+        logical_unit: Optional[str] = None,
         include_related: bool = False,
         max_related_per_lu: int = 5,
     ) -> List[SearchResult]:
@@ -94,6 +96,8 @@ class IFSCloudSearchEngine:
             file_type: Filter by file type (optional)
             min_complexity: Minimum complexity score (optional)
             max_complexity: Maximum complexity score (optional)
+            module: Filter by module (optional)
+            logical_unit: Filter by logical unit (optional)
             include_related: Whether to include related files from same logical units
             max_related_per_lu: Maximum related files per logical unit
 
@@ -108,15 +112,90 @@ class IFSCloudSearchEngine:
                 min_complexity=min_complexity,
                 max_complexity=max_complexity,
                 max_related_per_lu=max_related_per_lu,
+                module=module,
+                logical_unit=logical_unit,
             )
         else:
-            return self.indexer.search_deduplicated(
+            # Dual-search approach: combine index and metadata results
+            all_results = []
+            seen_paths = set()
+
+            # 1. Get index-based results (traditional search) - prioritize this
+            index_results = self.indexer.search_deduplicated(
                 query=query,
-                limit=limit,
-                file_type=file_type,
+                limit=limit * 3,  # Get more results to allow for better merging
+                file_type=None,  # Don't filter at indexer level, we'll filter later
                 min_complexity=min_complexity,
                 max_complexity=max_complexity,
             )
+
+            # Add index results with proper scoring
+            for result in index_results:
+                if result.path not in seen_paths:
+                    all_results.append(result)
+                    seen_paths.add(result.path)
+
+            # 2. Get metadata-enhanced results if available (but limit this)
+            if self.enhanced_search_engine and len(all_results) < limit * 2:
+                try:
+                    from .enhanced_search import SearchContext
+
+                    # Map file_type to content_types_filter for metadata search
+                    content_types_filter = None
+                    if file_type:
+                        # Remove the dot and map to content type
+                        content_type = file_type.lstrip(".")
+                        content_types_filter = [content_type]
+
+                    context = SearchContext(
+                        query=query,
+                        limit=max(
+                            10, limit
+                        ),  # Limit metadata search to prevent too many calls
+                        modules_filter=[module] if module else None,
+                        content_types_filter=content_types_filter,
+                        logical_units_filter=[logical_unit] if logical_unit else None,
+                        fuzzy_threshold=80.0,  # Higher threshold for more precision
+                        include_related=False,
+                    )
+
+                    enhanced_results = self.enhanced_search_engine.enhanced_search(
+                        context
+                    )
+
+                    # Convert enhanced results to SearchResult and merge (limit to prevent spam)
+                    for enhanced_result in enhanced_results[:limit]:
+                        if enhanced_result.file_path not in seen_paths:
+                            # Convert enhanced result to SearchResult
+                            search_result = self._convert_enhanced_to_search_result(
+                                enhanced_result
+                            )
+                            # Boost score for metadata-found results
+                            search_result.score = (
+                                enhanced_result.confidence * 1.5
+                            )  # Moderate boost for metadata matches
+                            all_results.append(search_result)
+                            seen_paths.add(enhanced_result.file_path)
+
+                except Exception as e:
+                    logger.debug(f"Metadata search failed: {e}")
+
+            # 3. Re-rank combined results using business logic
+            all_results = self._apply_business_ranking(all_results, query)
+
+            # 4. Apply final filters that weren't handled by individual searches
+            filtered_results = self._apply_post_search_filters(
+                all_results,
+                file_type,
+                module,
+                logical_unit,
+                min_complexity,
+                max_complexity,
+            )
+
+            # 5. Sort by final score and limit
+            filtered_results.sort(key=lambda x: x.score, reverse=True)
+            return filtered_results[:limit]
 
     def search_with_related_files(
         self,
@@ -126,6 +205,8 @@ class IFSCloudSearchEngine:
         min_complexity: Optional[float] = None,
         max_complexity: Optional[float] = None,
         max_related_per_lu: int = 5,
+        module: Optional[str] = None,
+        logical_unit: Optional[str] = None,
     ) -> List[SearchResult]:
         """
         Search with related files from the same logical units.
@@ -133,13 +214,16 @@ class IFSCloudSearchEngine:
         When a logical unit is found (e.g., "Activity"), includes related files
         like Activity.entity, Activity.plsql, Activity.views, etc.
         """
-        # Get primary search results
-        primary_results = self.indexer.search_deduplicated(
+        # Get primary search results (use regular search method to apply filters)
+        primary_results = self.search(
             query=query,
             limit=limit,
             file_type=file_type,
             min_complexity=min_complexity,
             max_complexity=max_complexity,
+            module=module,
+            logical_unit=logical_unit,
+            include_related=False,  # Avoid recursion
         )
 
         if not primary_results:
@@ -167,6 +251,13 @@ class IFSCloudSearchEngine:
                     related.path not in primary_paths
                     and related_count < max_related_per_lu
                 ):
+                    # Apply file type filter to related files too
+                    if file_type and related.type:
+                        if not related.type.endswith(file_type):
+                            continue
+                    elif file_type and not related.type:
+                        continue
+
                     # Reduce score slightly to indicate it's a related result
                     related.score *= 0.8
                     related_results.append(related)
@@ -457,3 +548,177 @@ WHERE module IS NOT NULL
 ORDER BY module, lu_name, view_name
             """.strip(),
         }
+
+    def _convert_enhanced_to_search_result(self, enhanced_result) -> "SearchResult":
+        """Convert an enhanced search result to a standard SearchResult."""
+        # Try to find the result in our index to get full metadata
+        try:
+            index_results = self.indexer.search_deduplicated(
+                query=f'path:"{enhanced_result.file_path}"', limit=1
+            )
+            if index_results:
+                # Use the index result but with enhanced score
+                return index_results[0]
+        except Exception:
+            pass
+
+        # Fallback: create a basic SearchResult from enhanced result
+        from datetime import datetime
+        from .indexer import SearchResult
+
+        return SearchResult(
+            path=enhanced_result.file_path,
+            name=Path(enhanced_result.file_path).name,
+            type=f".{enhanced_result.content_type}",
+            content_preview=enhanced_result.snippet,
+            score=enhanced_result.confidence,
+            entities=[],
+            functions=[],
+            line_count=0,
+            complexity_score=0.0,
+            pagerank_score=0.0,
+            modified_time=datetime.now(),
+            hash="",
+            module=enhanced_result.module,
+            logical_unit=enhanced_result.logical_unit,
+            entity_name=None,
+            component=None,
+            pages=[],
+            lists=[],
+            groups=[],
+            entitysets=[],
+            iconsets=[],
+            trees=[],
+            navigators=[],
+            contexts=[],
+            dependencies=[],
+            imports=[],
+            highlight="",
+            tags=[],
+        )
+
+    def _apply_business_ranking(
+        self, results: List["SearchResult"], query: str
+    ) -> List["SearchResult"]:
+        """Apply business logic ranking to search results."""
+        query_lower = query.lower()
+        business_terms = [
+            "authorization",
+            "approval",
+            "workflow",
+            "validation",
+            "business",
+            "rule",
+        ]
+        entity_terms = [
+            "employee",
+            "customer",
+            "order",
+            "activity",
+            "person",
+            "company",
+        ]
+
+        for result in results:
+            original_score = result.score
+
+            # For entity-like searches, prioritize files that contain business logic
+            if any(term in query_lower for term in entity_terms):
+                if result.type == ".plsql":
+                    result.score *= 2.5  # Strong boost for business logic files
+                elif result.type == ".views":
+                    result.score *= 1.8  # Database views often contain useful logic
+                elif result.type == ".projection":
+                    result.score *= 1.6  # API projections show the interface
+                elif result.type == ".client":
+                    result.score *= 1.4  # UI definitions show user interaction
+                elif result.type == ".entity":
+                    result.score *= 0.8  # Reduce entity priority for practical searches
+
+            # Business logic boosting for certain queries
+            if any(term in query_lower for term in business_terms):
+                if result.type == ".plsql":
+                    result.score *= 3.0  # Very strong boost for business logic files
+                elif result.type == ".entity":
+                    result.score *= (
+                        0.5  # Significantly reduce entity ranking for business queries
+                    )
+
+            # File type priority boosting for exact name matches
+            if query_lower in result.name.lower():
+                filename_match_boost = 1.5
+                if result.type == ".plsql":
+                    result.score *= (
+                        filename_match_boost * 1.2
+                    )  # Extra boost for API files
+                elif result.type == ".views":
+                    result.score *= filename_match_boost
+                elif result.type == ".projection":
+                    result.score *= filename_match_boost
+                elif result.type == ".entity":
+                    result.score *= (
+                        filename_match_boost * 0.9
+                    )  # Slightly less for entities
+
+            # Module relevance boosting for core business modules
+            if result.module and result.module.upper() in [
+                "PERSON",
+                "ORDER",
+                "ACCRUL",
+                "INVENT",
+            ]:
+                result.score *= 1.15
+
+            # File size/complexity boosting - larger files often have more business logic
+            if result.type == ".plsql" and result.line_count > 100:
+                complexity_boost = min(1.5, 1.0 + (result.line_count / 1000))
+                result.score *= complexity_boost
+
+        return results
+
+    def _apply_post_search_filters(
+        self,
+        results: List["SearchResult"],
+        file_type: Optional[str],
+        module: Optional[str],
+        logical_unit: Optional[str],
+        min_complexity: Optional[float],
+        max_complexity: Optional[float],
+    ) -> List["SearchResult"]:
+        """Apply filters that couldn't be applied during search."""
+        filtered_results = []
+
+        for result in results:
+            # File type filter
+            if file_type and result.type:
+                if not result.type.endswith(file_type):
+                    continue
+            elif file_type and not result.type:
+                # Skip results without type if file type filter is specified
+                continue
+
+            # Module filter
+            if module and result.module:
+                if not result.module.lower().startswith(module.lower()):
+                    continue
+            elif module and not result.module:
+                # Skip results without module if module filter is specified
+                continue
+
+            # Logical unit filter
+            if logical_unit and result.logical_unit:
+                if not result.logical_unit.lower().startswith(logical_unit.lower()):
+                    continue
+            elif logical_unit and not result.logical_unit:
+                # Skip results without logical unit if logical unit filter is specified
+                continue
+
+            # Complexity filters
+            if min_complexity is not None and result.complexity_score < min_complexity:
+                continue
+            if max_complexity is not None and result.complexity_score > max_complexity:
+                continue
+
+            filtered_results.append(result)
+
+        return filtered_results

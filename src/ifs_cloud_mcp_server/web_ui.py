@@ -151,11 +151,13 @@ class IFSCloudWebUI:
         @self.app.get("/", response_class=HTMLResponse)
         async def root(request: Request):
             """Serve the main search interface."""
-            return self.templates.TemplateResponse("react.html", {"request": request})
+            return self.templates.TemplateResponse(
+                "modern_react.html", {"request": request}
+            )
 
         @self.app.get("/api/search")
         async def search(
-            q: str = Query(..., description="Search query"),
+            query: str = Query(..., description="Search query"),
             limit: int = Query(20, description="Maximum results"),
             file_type: Optional[str] = Query(None, description="Filter by file type"),
             module: Optional[str] = Query(None, description="Filter by module"),
@@ -180,15 +182,19 @@ class IFSCloudWebUI:
                     )
 
                 logger.debug(
-                    f"Performing search: query='{q}', limit={limit}, file_type={file_type}, module={module}, logical_unit={logical_unit}"
+                    f"Performing search: query='{query}', limit={limit}, file_type={file_type}, module={module}, logical_unit={logical_unit}"
                 )
 
+                # Use intelligent search approach like the MCP tool
                 results = self.search_engine.search(
-                    query=q,
+                    query=query,
                     limit=limit,
                     file_type=file_type,
+                    module=module,
+                    logical_unit=logical_unit,
                     min_complexity=min_complexity,
                     max_complexity=max_complexity,
+                    include_related=True,  # Enable intelligent search behavior
                 )
 
                 logger.debug(f"Search returned {len(results)} unique results")
@@ -210,7 +216,7 @@ class IFSCloudWebUI:
                         tags.append("has-navigators")
 
                     # Create highlight snippet
-                    highlight = self._create_highlight(result.content_preview, q)
+                    highlight = self._create_highlight(result.content_preview, query)
 
                     web_result = WebUISearchResult(
                         path=result.path,
@@ -244,7 +250,7 @@ class IFSCloudWebUI:
                 response_data = {
                     "results": [r.model_dump(mode="json") for r in web_results],
                     "total": len(web_results),
-                    "query": q,
+                    "query": query,
                     "filters": {
                         "file_type": file_type,
                         "module": module,
@@ -257,7 +263,7 @@ class IFSCloudWebUI:
             except Exception as e:
                 logger.error(f"Search error: {type(e).__name__}: {e}")
                 logger.error(
-                    f"Search parameters: q='{q}', limit={limit}, file_type={file_type}"
+                    f"Search parameters: query='{query}', limit={limit}, file_type={file_type}"
                 )
                 raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
@@ -265,7 +271,7 @@ class IFSCloudWebUI:
         async def post_search(request: SearchRequest):
             """Search endpoint via POST."""
             try:
-                # Check if index is properly initialized
+                # Check if search engine is ready
                 if self.indexer._index is None:
                     logger.error("Index is not initialized")
                     raise HTTPException(
@@ -277,9 +283,9 @@ class IFSCloudWebUI:
                     f"Performing POST search: query='{request.query}', limit={request.limit}"
                 )
 
-                # Perform search with filters
-                results = self.indexer.search_deduplicated(
-                    request.query,
+                # Perform search with filters using search engine
+                results = self.search_engine.search(
+                    query=request.query,
                     limit=request.limit,
                     file_type=getattr(request, "file_type", None),
                     module=getattr(request, "module", None),
@@ -358,7 +364,7 @@ class IFSCloudWebUI:
         async def post_search(request: SearchRequest):
             """Search endpoint via POST with JSON request."""
             try:
-                # Check if index is properly initialized
+                # Check if search engine is ready
                 if self.indexer._index is None:
                     logger.error("Index is not initialized")
                     raise HTTPException(
@@ -370,9 +376,9 @@ class IFSCloudWebUI:
                     f"Performing POST search: query='{request.query}', limit={request.limit}"
                 )
 
-                # Perform search
-                results = self.indexer.search_deduplicated(
-                    request.query,
+                # Perform search using search engine
+                results = self.search_engine.search(
+                    query=request.query,
                     limit=request.limit,
                     file_type=getattr(request, "file_type", None),
                     module=getattr(request, "module", None),
@@ -452,12 +458,12 @@ class IFSCloudWebUI:
 
         @self.app.get("/api/suggestions")
         async def get_suggestions(
-            q: str = Query(..., description="Partial query for suggestions"),
+            query: str = Query(..., description="Partial query for suggestions"),
             limit: int = Query(10, description="Maximum suggestions"),
         ):
             """Get type-ahead suggestions."""
             try:
-                if len(q) < 2:  # Don't suggest for very short queries
+                if len(query) < 2:  # Don't suggest for very short queries
                     return JSONResponse({"suggestions": []})
 
                 # Check if index is properly initialized
@@ -468,7 +474,7 @@ class IFSCloudWebUI:
                     )
 
                 # Check cache first
-                cache_key = f"{q}:{limit}"
+                cache_key = f"{query}:{limit}"
                 if cache_key in self._suggestion_cache:
                     return JSONResponse(
                         {
@@ -479,7 +485,7 @@ class IFSCloudWebUI:
                         }
                     )
 
-                suggestions = await self._generate_suggestions(q, limit)
+                suggestions = await self._generate_suggestions(query, limit)
                 self._suggestion_cache[cache_key] = suggestions
 
                 return JSONResponse(
@@ -488,6 +494,46 @@ class IFSCloudWebUI:
 
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.get("/api/file-content")
+        async def get_file_content(path: str = Query(..., description="File path")):
+            """Get file content for viewing."""
+            try:
+                from pathlib import Path
+
+                # Validate and resolve the file path
+                file_path = Path(path)
+                if not file_path.exists():
+                    raise HTTPException(status_code=404, detail="File not found")
+
+                if not file_path.is_file():
+                    raise HTTPException(status_code=400, detail="Path is not a file")
+
+                # Read file content
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                except UnicodeDecodeError:
+                    # Try with latin-1 encoding if UTF-8 fails
+                    with open(file_path, "r", encoding="latin-1") as f:
+                        content = f.read()
+
+                return JSONResponse(
+                    {
+                        "path": str(file_path),
+                        "content": content,
+                        "size": len(content),
+                        "lines": content.count("\n") + 1 if content else 0,
+                    }
+                )
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Error reading file {path}: {e}")
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to read file: {str(e)}"
+                )
 
         @self.app.post("/suggestions")
         async def post_suggestions(request: SearchRequest):
@@ -761,9 +807,7 @@ class IFSCloudWebUI:
         all_results = []
         for search_query in search_queries:
             try:
-                results = self.indexer.search_deduplicated(
-                    search_query, limit=limit * 3
-                )
+                results = self.search_engine.search(query=search_query, limit=limit * 3)
                 all_results.extend(results)
                 if len(all_results) >= limit * 2:  # Stop early if we have enough
                     break
@@ -773,7 +817,7 @@ class IFSCloudWebUI:
         # If no results from advanced search, try basic search
         if not all_results:
             try:
-                all_results = self.indexer.search_deduplicated(query, limit=limit * 2)
+                all_results = self.search_engine.search(query=query, limit=limit * 2)
             except:
                 pass
 

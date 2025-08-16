@@ -1,7 +1,8 @@
 # 🧠 IFS Cloud Intelligent AI Agent
 
-> **Transform your IFS Cloud developme  --connection "oracle://ifsapp:password@host:1521/IFSCDEV" 25.1.0
-```
+> \*\*Transform your IFS Cloud developme --connection "oracle://ifsapp:password@host:1521/IFSCDEV" 25.1.0
+
+````
 
 **📁 Custom ZIP Import** (For specific versions):deeply understands your codebase**
 
@@ -33,7 +34,16 @@ An intelligent Model Context Protocol (MCP) server that makes AI agents truly sm
 - **Perfect Integration**: Every implementation matches your existing IFS Cloud conventions
 - **Zero False Positives**: Conservative analysis ensures reliable insights
 
-### � **GUI-Aware Smart Search**
+### 🎨 **Modern Web Interface**
+
+- **React + TypeScript**: Modern, responsive web UI with real-time search
+- **Type-ahead Suggestions**: Smart autocomplete with context-aware suggestions
+- **Faceted Filters**: Advanced filtering by file type, complexity, and module
+- **File Viewer**: Built-in CodeMirror editor with IFS Marble syntax highlighting
+- **Dark Theme**: Sleek, modern design optimized for developer productivity
+- **Mobile Responsive**: Works perfectly on desktop, tablet, and mobile devices
+
+### 🧠 **GUI-Aware Smart Search**
 
 - **Real Production Mappings**: GUI labels mapped to backend entities using live IFS Cloud databases
 - **60% Perfect Matches**: Search for "Customer Order" and find CustomerOrder entities instantly
@@ -59,9 +69,19 @@ An intelligent Model Context Protocol (MCP) server that makes AI agents truly sm
 git clone https://github.com/graknol/ifs-cloud-core-mcp-server.git
 cd ifs-cloud-core-mcp-server
 uv sync
+````
+
+### 2. **Launch the Web Interface**
+
+```bash
+# Start the modern web UI
+uv run python -m src.ifs_cloud_mcp_server.web_ui
+
+# Opens at http://localhost:5700
+# Features: Real-time search, type-ahead, file viewer, dark theme
 ```
 
-### 2. **Choose Your Approach**
+### 3. **Choose Your Data Source**
 
 **🏭 Extract from Your Database** (Recommended - Environment-Specific):
 
