@@ -8,6 +8,7 @@ from datetime import datetime
 from fastmcp import FastMCP
 
 from .indexer import IFSCloudIndexer, SearchResult
+from .search_engine import IFSCloudSearchEngine
 from .config import ConfigManager
 from .plsql_analyzer import ConservativePLSQLAnalyzer
 from .client_analyzer import ConservativeClientAnalyzer
@@ -33,6 +34,7 @@ class IFSCloudMCPServer:
         self.name = name
         self.mcp = FastMCP(name)
         self.indexer = IFSCloudIndexer(index_path)
+        self.search_engine = IFSCloudSearchEngine(self.indexer)
         self.config_manager = ConfigManager()
 
         # Initialize analyzers for comprehensive code understanding
@@ -87,11 +89,14 @@ class IFSCloudMCPServer:
             - min_complexity=0.0: Include simple files
             - max_complexity=0.5: Exclude very complex files
             - Use for finding simple examples or complex implementations
+            - To search by complexity only: search_content("*", min_complexity=0.3, max_complexity=0.7)
 
             **Examples:**
             - Find order logic: search_content("CustomerOrder pricing", file_type=".plsql")
             - Simple entities: search_content("Product", file_type=".entity", max_complexity=0.3)
             - Validation patterns: search_content("Check_Insert___", limit=20)
+            - Complex files only: search_content("*", min_complexity=0.8, limit=5)
+            - Find by complexity: search_content("*", min_complexity=0.2, max_complexity=0.6)
 
             **Output:** Ranked search results with content previews and file information
 
@@ -102,7 +107,7 @@ class IFSCloudMCPServer:
                 min_complexity: Minimum complexity score (0.0-1.0)
                 max_complexity: Maximum complexity score (0.0-1.0)
             """
-            results = self.indexer.search_deduplicated(
+            results = self.search_engine.search(
                 query=query,
                 limit=limit,
                 file_type=file_type,
@@ -118,22 +123,187 @@ class IFSCloudMCPServer:
             )
 
         @self.mcp.tool()
+        async def intelligent_search(
+            query: str,
+            limit: int = 10,
+            include_related: bool = True,
+            boost_business_logic: bool = True,
+        ) -> str:
+            """Perform intelligent search with metadata enhancement and related files.
+
+            **AGENT INSTRUCTIONS:**
+            Advanced search tool that combines index search with IFS Cloud metadata for optimal results.
+
+            **Key Features:**
+            - **Metadata-Enhanced Ranking**: Uses IFS business context for better relevance
+            - **Related File Discovery**: Automatically includes related files (e.g., Activity.entity + Activity.plsql + Activity.views)
+            - **Business Logic Boosting**: Prioritizes .plsql files for authorization/business rule queries
+            - **Cross-Module Understanding**: Leverages IFS module relationships
+
+            **When to use (PREFERRED over search_content):**
+            - Finding core business logic for entities (e.g., "CustomerOrder authorization")
+            - Discovering complete logical unit implementations
+            - Authorization and approval workflow searches
+            - Business rule and validation searches
+            - When you need comprehensive results for an IFS concept
+
+            **Examples:**
+            - "expense authorization" → Gets ExpenseHeader.plsql + related files
+            - "Activity" → Gets Activity.entity, Activity.plsql, Activity.views, etc.
+            - "customer order approval" → Prioritizes business logic files
+            - "purchase requisition workflow" → Finds workflow-related files
+
+            **Advantages over basic search:**
+            - Understands IFS business terminology
+            - Groups related files by logical unit
+            - Ranks by business importance, not just text matching
+            - Includes files you might miss with basic keyword search
+
+            Args:
+                query: Search query (business terminology works best)
+                limit: Maximum number of results (default: 10)
+                include_related: Include related files from same logical units (default: True)
+                boost_business_logic: Apply extra boosting for business logic files (default: True)
+            """
+            results = self.search_engine.search(
+                query=query,
+                limit=limit,
+                include_related=include_related,
+            )
+
+            if not results:
+                return f"No results found for intelligent search query: '{query}'"
+
+            # Add metadata context if available
+            context_info = ""
+            if self.search_engine.has_metadata_enhancement():
+                context_info = f"\n[Enhanced with IFS {self.search_engine.get_current_ifs_version()} metadata]"
+
+                # Add related search suggestions
+                suggestions = self.search_engine.suggest_related_searches(
+                    query, limit=3
+                )
+                if suggestions:
+                    context_info += f"\nRelated suggestions: {', '.join(suggestions)}"
+
+            return self._format_search_results(
+                results, f"Intelligent search results for '{query}'{context_info}"
+            )
+
+        @self.mcp.tool()
+        async def set_ifs_version(version: str) -> str:
+            """Set IFS version for metadata-enhanced search.
+
+            **AGENT INSTRUCTIONS:**
+            Configure the server to use specific IFS Cloud version metadata for enhanced search results.
+
+            **Usage:**
+            - Call this before using intelligent_search for best results
+            - Required for metadata-enhanced features
+            - Available versions: 25.1.0 and others (use get_available_ifs_versions to check)
+
+            Args:
+                version: IFS Cloud version (e.g., "25.1.0")
+            """
+            success = self.search_engine.set_ifs_version(version)
+
+            if success:
+                return f"Successfully set IFS version to {version}. Enhanced search features are now available."
+            else:
+                available = self.search_engine.get_available_ifs_versions()
+                return f"Failed to set IFS version {version}. Available versions: {available}"
+
+        @self.mcp.tool()
+        async def get_available_ifs_versions() -> str:
+            """Get list of available IFS versions with metadata.
+
+            Returns:
+                List of available IFS versions that can be used with enhanced search
+            """
+            versions = self.search_engine.get_available_ifs_versions()
+            current = self.search_engine.get_current_ifs_version()
+
+            result = f"Available IFS versions: {versions}\n"
+            if current:
+                result += f"Current version: {current}"
+            else:
+                result += "No version currently set. Use set_ifs_version() to enable enhanced features."
+
+            return result
+
+        @self.mcp.tool()
+        async def find_related_files(logical_unit: str, limit: int = 10) -> str:
+            """Find all files related to a specific logical unit.
+
+            **AGENT INSTRUCTIONS:**
+            Find all core files for an IFS logical unit (entity, plsql, views, client, etc.)
+
+            **When to use:**
+            - Understanding complete implementation of an entity
+            - Finding all customization points for a logical unit
+            - Discovering the full file structure for an IFS concept
+
+            **Examples:**
+            - find_related_files("CustomerOrder") → All CustomerOrder files
+            - find_related_files("Activity") → Activity.entity, Activity.plsql, etc.
+
+            Args:
+                logical_unit: Name of the IFS logical unit (e.g., "Activity", "CustomerOrder")
+                limit: Maximum number of related files to return
+            """
+            results = self.search_engine.find_related_files(logical_unit)
+
+            if not results:
+                return f"No files found for logical unit: '{logical_unit}'"
+
+            return self._format_search_results(
+                results[:limit], f"Files related to logical unit '{logical_unit}'"
+            )
+
+        @self.mcp.tool()
+        async def get_module_statistics() -> str:
+            """Get statistics about available IFS modules from metadata.
+
+            Returns:
+                Statistics about IFS modules, logical units, and metadata status
+            """
+            stats = self.search_engine.get_module_statistics()
+
+            if "error" in stats:
+                return f"Module statistics not available: {stats['error']}"
+
+            result = "IFS Module Statistics:\n\n"
+
+            if isinstance(stats, dict):
+                for module, info in sorted(stats.items()):
+                    if isinstance(info, dict):
+                        result += (
+                            f"**{module}**: {info.get('lu_count', 0)} logical units\n"
+                        )
+                        if "sample_entities" in info:
+                            result += f"  Sample entities: {', '.join(info['sample_entities'][:3])}\n"
+                        result += "\n"
+
+            return result
+
+        @self.mcp.tool()
         async def search_entities(entity: str, limit: int = 10) -> str:
-            """Search for files containing specific IFS entities.
+            """Search for files containing specific IFS entities with related files.
 
             Args:
                 entity: Entity name to search for
                 limit: Maximum number of results (default: 10)
             """
-            # Search in entities field specifically
-            query = f"entities:{entity}"
-            results = self.indexer.search_deduplicated(query=query, limit=limit)
+            # Use intelligent search to find entities and related files
+            results = self.search_engine.search(
+                query=entity, limit=limit, include_related=True
+            )
 
             if not results:
                 return f"No files found containing entity: '{entity}'"
 
             return self._format_search_results(
-                results, f"Files containing entity '{entity}'"
+                results, f"Files containing entity '{entity}' (with related files)"
             )
 
         @self.mcp.tool()
@@ -158,9 +328,7 @@ class IFSCloudMCPServer:
             if logical_unit:
                 enhanced_query += f" logical_unit:{logical_unit}"
 
-            results = self.indexer.search_deduplicated(
-                query=enhanced_query, limit=limit
-            )
+            results = self.search_engine.search(query=enhanced_query, limit=limit)
 
             if not results:
                 filter_desc = ""
@@ -214,63 +382,6 @@ class IFSCloudMCPServer:
             return self._format_search_results(
                 filtered_results, f"Files similar to '{file_path}'"
             )
-
-        @self.mcp.tool()
-        async def search_by_complexity(
-            min_complexity: Optional[float] = None,
-            max_complexity: Optional[float] = None,
-            file_type: Optional[str] = None,
-            limit: int = 10,
-        ) -> str:
-            """Search files by complexity score range.
-
-            Args:
-                min_complexity: Minimum complexity score (0.0-1.0)
-                max_complexity: Maximum complexity score (0.0-1.0)
-                file_type: Filter by file type
-                limit: Maximum number of results (default: 10)
-            """
-            # Use a broad query and filter by complexity
-            query = "*"
-            results = self.indexer.search_deduplicated(
-                query=query,
-                limit=limit * 2,  # Get more results to filter
-                file_type=file_type,
-                min_complexity=min_complexity,
-                max_complexity=max_complexity,
-            )
-
-            # Additional client-side filtering if needed
-            if min_complexity is not None or max_complexity is not None:
-                filtered_results = []
-                for result in results:
-                    if (
-                        min_complexity is not None
-                        and result.complexity_score < min_complexity
-                    ):
-                        continue
-                    if (
-                        max_complexity is not None
-                        and result.complexity_score > max_complexity
-                    ):
-                        continue
-                    filtered_results.append(result)
-                results = filtered_results[:limit]
-
-            if not results:
-                complexity_range = ""
-                if min_complexity is not None and max_complexity is not None:
-                    complexity_range = (
-                        f" (complexity: {min_complexity}-{max_complexity})"
-                    )
-                elif min_complexity is not None:
-                    complexity_range = f" (complexity: >={min_complexity})"
-                elif max_complexity is not None:
-                    complexity_range = f" (complexity: <={max_complexity})"
-
-                return f"No files found{complexity_range}"
-
-            return self._format_search_results(results, "Files by complexity")
 
         @self.mcp.tool()
         async def index_directory(path: str, recursive: bool = True) -> str:
@@ -345,7 +456,7 @@ Supported File Types:
             # Add fuzzy search operators to the query
             fuzzy_query = f"{query}~"  # Tantivy fuzzy search syntax
 
-            results = self.indexer.search_deduplicated(query=fuzzy_query, limit=limit)
+            results = self.search_engine.search(query=fuzzy_query, limit=limit)
 
             if not results:
                 return f"No results found for fuzzy query: '{query}'"
@@ -419,12 +530,12 @@ Supported File Types:
                 entity_name: Name of the entity to analyze
             """
             # Search for files that contain this entity
-            entity_results = self.indexer.search_deduplicated(
+            entity_results = self.search_engine.search(
                 query=f"entities:{entity_name}", limit=50
             )
 
             # Search for files that depend on this entity
-            dependency_results = self.indexer.search_deduplicated(
+            dependency_results = self.search_engine.search(
                 query=f"dependencies:{entity_name}", limit=50
             )
 
@@ -494,7 +605,7 @@ Supported File Types:
             if entity_name:
                 query += f" AND entities:{entity_name}"
 
-            results = self.indexer.search_deduplicated(query=query, limit=50)
+            results = self.search_engine.search(query=query, limit=50)
 
             response_lines = ["Override and Overtake Analysis", "=" * 40, ""]
 
@@ -3610,8 +3721,8 @@ selector {fragment_name}Selector {{
                     if domain:
                         query += f" module:{domain.lower()}"
 
-                    search_results = self.indexer.search_deduplicated(
-                        query=query, limit=5, file_type=None
+                    search_results = self.search_engine.search(
+                        query=query, limit=5, include_related=True
                     )
 
                     if search_results:
@@ -3636,7 +3747,7 @@ selector {fragment_name}Selector {{
                         if domain:
                             query += f" module:{domain.lower()}"
 
-                        search_results = self.indexer.search_deduplicated(
+                        search_results = self.search_engine.search(
                             query=query, limit=3, file_type=".plsql"
                         )
 
@@ -3649,7 +3760,7 @@ selector {fragment_name}Selector {{
                 # Strategy 3: Entity-based searches
                 if domain:
                     entity_query = f"module:{domain.lower()}"
-                    entity_results = self.indexer.search_deduplicated(
+                    entity_results = self.search_engine.search(
                         query=entity_query, limit=5, file_type=".entity"
                     )
                     if entity_results:

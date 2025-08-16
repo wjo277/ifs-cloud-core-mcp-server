@@ -21,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from .indexer import IFSCloudIndexer, SearchResult
+from .search_engine import IFSCloudSearchEngine
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,7 @@ class IFSCloudWebUI:
 
     def __init__(self, index_path: str = "./index"):
         self.indexer = IFSCloudIndexer(index_path)
+        self.search_engine = IFSCloudSearchEngine(self.indexer)
         self.app = FastAPI(
             title="IFS Cloud Explorer",
             description="Web UI for exploring IFS Cloud codebases with intelligent search",
@@ -181,12 +183,10 @@ class IFSCloudWebUI:
                     f"Performing search: query='{q}', limit={limit}, file_type={file_type}, module={module}, logical_unit={logical_unit}"
                 )
 
-                results = self.indexer.search_deduplicated(
+                results = self.search_engine.search(
                     query=q,
                     limit=limit,
                     file_type=file_type,
-                    module=module,
-                    logical_unit=logical_unit,
                     min_complexity=min_complexity,
                     max_complexity=max_complexity,
                 )

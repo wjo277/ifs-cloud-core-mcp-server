@@ -172,7 +172,7 @@ class MetadataEnhancedSearchEngine:
         Initialize enhanced search engine
 
         Args:
-            base_search_engine: Existing search engine (e.g., from indexer)
+            base_search_engine: Base search engine instance
             metadata_manager: MetadataManager instance
         """
         self.base_engine = base_search_engine
@@ -213,24 +213,55 @@ class MetadataEnhancedSearchEngine:
 
     def _get_base_results(self, context: SearchContext) -> List[Dict[str, Any]]:
         """Get results from base search engine"""
-        # This would interface with your existing indexer's search functionality
-        # For now, returning mock structure - replace with actual implementation
+        try:
+            # Get search results from the base search engine
+            if hasattr(self.base_engine, "search"):
+                # Get basic search results
+                search_results = self.base_engine.search(
+                    query=context.query,
+                    limit=context.limit * 2,  # Get more for metadata filtering
+                    include_related=context.include_related,
+                )
 
-        if hasattr(self.base_engine, "search"):
-            return self.base_engine.search(context.query)
-        elif hasattr(self.base_engine, "search_files"):
-            return self.base_engine.search_files(context.query)
-        else:
-            # Fallback - mock results for testing
-            logger.warning("Base search engine method not found - using mock results")
-            return [
-                {
-                    "file_path": "CustomerOrder.entity",
-                    "line_number": 1,
-                    "snippet": f"entity CustomerOrder {context.query}",
-                    "content_type": "entity",
-                }
-            ]
+                # Convert SearchResult objects to dict format
+                dict_results = []
+                for result in search_results:
+                    dict_results.append(
+                        {
+                            "file_path": result.path,
+                            "line_number": 1,
+                            "snippet": result.content_preview,
+                            "content_type": result.type.lstrip(
+                                "."
+                            ),  # Remove leading dot
+                            "confidence": min(
+                                100.0, result.score / 10.0
+                            ),  # Normalize score
+                            "logical_unit": result.logical_unit,
+                            "module": result.module,
+                        }
+                    )
+
+                return dict_results
+            else:
+                # Fallback - mock results for testing
+                logger.warning(
+                    "Base search engine method not found - using mock results"
+                )
+                return [
+                    {
+                        "file_path": "CustomerOrder.entity",
+                        "line_number": 1,
+                        "snippet": f"entity CustomerOrder {context.query}",
+                        "content_type": "entity",
+                        "confidence": 50.0,
+                        "logical_unit": "CustomerOrder",
+                        "module": "ORDER",
+                    }
+                ]
+        except Exception as e:
+            logger.error(f"Error getting base results: {e}")
+            return []
 
     def _enhance_with_metadata(
         self, base_results: List[Dict], context: SearchContext

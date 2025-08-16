@@ -6,7 +6,7 @@ import logging
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Any, Union
+from typing import Dict, List, Optional, Set, Any, Union, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 from collections import defaultdict, Counter
@@ -63,7 +63,7 @@ class SearchResult(BaseModel):
         json_encoders = {datetime: lambda v: v.isoformat()}
 
 
-class IFSCloudTantivyIndexer:
+class IFSCloudIndexer:
     """High-performance Tantivy-based indexer for IFS Cloud files."""
 
     # Supported IFS Cloud file extensions
@@ -499,107 +499,121 @@ class IFSCloudTantivyIndexer:
 
     def calculate_pagerank_scores(self) -> Dict[str, float]:
         """Calculate PageRank scores for all entities in the index.
-        
+
         This implements a simplified PageRank algorithm where:
         - Each entity gets votes from files that reference it
         - More referenced entities get higher scores
         - Entities that reference important entities also get boosted
-        
+
         Returns:
             Dictionary mapping entity names to PageRank scores
         """
         if not self._index:
             return {}
-            
+
         searcher = self._index.searcher()
-        
+
         # Build entity reference graph
         entity_graph = defaultdict(set)  # entity -> set of entities that reference it
-        entity_dependencies = defaultdict(set)  # entity -> set of entities it depends on
+        entity_dependencies = defaultdict(
+            set
+        )  # entity -> set of entities it depends on
         all_entities = set()
-        
+
         try:
             # Get all documents to build the graph
             query = tantivy.Query.all_query()
             search_results = searcher.search(query, limit=10000)  # Get all docs
-            
+
             for score, doc_address in search_results.hits:
                 doc = searcher.doc(doc_address)
-                
+
                 # Get the primary entity for this file
                 entity_name = doc.get_first("entity_name")
                 if entity_name:
                     all_entities.add(entity_name)
-                    
+
                     # Get all entities this file depends on
                     dependencies_str = doc.get_first("dependencies") or ""
                     entities_str = doc.get_first("entities") or ""
-                    
+
                     # Combine dependencies and entities mentioned in the file
                     dependencies = []
                     if dependencies_str:
                         dependencies.extend(dependencies_str.split())
                     if entities_str:
                         dependencies.extend(entities_str.split())
-                    
+
                     # Remove duplicates and self-references
-                    dependencies = list(set(dep for dep in dependencies if dep and dep != entity_name))
-                    
+                    dependencies = list(
+                        set(dep for dep in dependencies if dep and dep != entity_name)
+                    )
+
                     # Build the graph
                     for dep in dependencies:
                         if dep:
                             all_entities.add(dep)
-                            entity_graph[dep].add(entity_name)  # dep is referenced by entity_name
-                            entity_dependencies[entity_name].add(dep)  # entity_name depends on dep
-            
+                            entity_graph[dep].add(
+                                entity_name
+                            )  # dep is referenced by entity_name
+                            entity_dependencies[entity_name].add(
+                                dep
+                            )  # entity_name depends on dep
+
             # Initialize PageRank scores
             num_entities = len(all_entities)
             if num_entities == 0:
                 return {}
-                
+
             pagerank_scores = {entity: 1.0 / num_entities for entity in all_entities}
-            
+
             # PageRank parameters
             damping_factor = 0.85
             iterations = 20
             convergence_threshold = 0.001
-            
+
             # Run PageRank iterations
             for iteration in range(iterations):
                 new_scores = {}
-                
+
                 for entity in all_entities:
                     # Base score (random surfer)
                     score = (1.0 - damping_factor) / num_entities
-                    
+
                     # Add scores from entities that reference this entity
                     for referencing_entity in entity_graph[entity]:
                         # Get the number of entities that the referencing entity depends on
                         out_degree = len(entity_dependencies[referencing_entity])
                         if out_degree > 0:
-                            score += damping_factor * (pagerank_scores[referencing_entity] / out_degree)
+                            score += damping_factor * (
+                                pagerank_scores[referencing_entity] / out_degree
+                            )
                         else:
                             # If an entity has no dependencies, distribute its score equally
-                            score += damping_factor * (pagerank_scores[referencing_entity] / num_entities)
-                    
+                            score += damping_factor * (
+                                pagerank_scores[referencing_entity] / num_entities
+                            )
+
                     new_scores[entity] = score
-                
+
                 # Check for convergence
-                max_change = max(abs(new_scores[entity] - pagerank_scores[entity]) 
-                               for entity in all_entities)
-                
+                max_change = max(
+                    abs(new_scores[entity] - pagerank_scores[entity])
+                    for entity in all_entities
+                )
+
                 pagerank_scores = new_scores
-                
+
                 if max_change < convergence_threshold:
                     logger.info(f"PageRank converged after {iteration + 1} iterations")
                     break
-            
+
             # Normalize scores to 0-1 range
             if pagerank_scores:
                 max_score = max(pagerank_scores.values())
                 min_score = min(pagerank_scores.values())
                 score_range = max_score - min_score
-                
+
                 if score_range > 0:
                     normalized_scores = {
                         entity: (score - min_score) / score_range
@@ -607,87 +621,112 @@ class IFSCloudTantivyIndexer:
                     }
                 else:
                     normalized_scores = {entity: 0.5 for entity in pagerank_scores}
-                
+
                 # Log top entities
-                top_entities = sorted(normalized_scores.items(), key=lambda x: x[1], reverse=True)[:10]
+                top_entities = sorted(
+                    normalized_scores.items(), key=lambda x: x[1], reverse=True
+                )[:10]
                 logger.info("Top PageRank entities:")
                 for entity, score in top_entities:
                     logger.info(f"  {entity}: {score:.3f}")
-                
+
                 return normalized_scores
-            
+
         except Exception as e:
             logger.error(f"Failed to calculate PageRank scores: {e}")
-            
+
         return {}
 
     def update_pagerank_scores(self):
         """Update PageRank scores for all documents in the index."""
         if not self._index:
             return
-            
+
         pagerank_scores = self.calculate_pagerank_scores()
         if not pagerank_scores:
             logger.warning("No PageRank scores calculated, skipping update")
             return
-            
+
         # Update documents with PageRank scores
         searcher = self._index.searcher()
         writer = self._index.writer()
-        
+
         try:
             query = tantivy.Query.all_query()
             search_results = searcher.search(query, limit=10000)
-            
+
             updated_count = 0
             for score, doc_address in search_results.hits:
                 doc = searcher.doc(doc_address)
-                
+
                 # Get entity name for this document
                 entity_name = doc.get_first("entity_name")
                 pagerank_score = 0.0
-                
+
                 if entity_name and entity_name in pagerank_scores:
                     pagerank_score = pagerank_scores[entity_name]
-                
+
                 # Create updated document with PageRank score
                 doc_dict = {}
-                for field_name in ["path", "name", "type", "content", "content_preview", 
-                                 "entities", "dependencies", "functions", "imports",
-                                 "module", "logical_unit", "entity_name", "component",
-                                 "pages", "lists", "groups", "entitysets", "iconsets",
-                                 "trees", "navigators", "contexts", "hash"]:
+                for field_name in [
+                    "path",
+                    "name",
+                    "type",
+                    "content",
+                    "content_preview",
+                    "entities",
+                    "dependencies",
+                    "functions",
+                    "imports",
+                    "module",
+                    "logical_unit",
+                    "entity_name",
+                    "component",
+                    "pages",
+                    "lists",
+                    "groups",
+                    "entitysets",
+                    "iconsets",
+                    "trees",
+                    "navigators",
+                    "contexts",
+                    "hash",
+                ]:
                     value = doc.get_first(field_name)
                     if value is not None:
                         doc_dict[field_name] = value
-                
+
                 # Add numeric fields
                 for field_name in ["size", "line_count"]:
                     value = doc.get_first(field_name)
                     if value is not None:
                         doc_dict[field_name] = value
-                
+
                 # Add float fields
                 complexity_score = doc.get_first("complexity_score")
                 if complexity_score is not None:
                     doc_dict["complexity_score"] = complexity_score
-                    
+
                 # Add the PageRank score
                 doc_dict["pagerank_score"] = pagerank_score
-                
+
                 # Add date field
                 modified_time = doc.get_first("modified_time")
                 if modified_time is not None:
                     doc_dict["modified_time"] = modified_time
-                
+
                 # Delete old document and add updated one
-                writer.delete_term(tantivy.Term.from_field_text(self._schema.get_field("path"), doc_dict["path"]))
+                writer.delete_term(
+                    tantivy.Term.from_field_text(
+                        self._schema.get_field("path"), doc_dict["path"]
+                    )
+                )
                 writer.add_document(tantivy.Document.from_dict(doc_dict))
                 updated_count += 1
-            
+
             writer.commit()
             logger.info(f"Updated PageRank scores for {updated_count} documents")
-            
+
         except Exception as e:
             logger.error(f"Failed to update PageRank scores: {e}")
 
@@ -1010,7 +1049,7 @@ class IFSCloudTantivyIndexer:
         )
 
         # Calculate PageRank scores after indexing is complete
-        if stats['indexed'] > 0:
+        if stats["indexed"] > 0:
             logger.info("Calculating PageRank scores for entities...")
             try:
                 self.update_pagerank_scores()
@@ -1070,6 +1109,213 @@ class IFSCloudTantivyIndexer:
         )
         return unique_results
 
+    def search_with_related_files(
+        self,
+        query: str,
+        limit: int = 10,
+        file_type: Optional[str] = None,
+        min_complexity: Optional[float] = None,
+        max_complexity: Optional[float] = None,
+        include_related: bool = True,
+        max_related_per_lu: int = 5,
+    ) -> List[SearchResult]:
+        """Search the index and include related files from the same logical units.
+
+        This method extends the standard search to include related files when a logical unit
+        is found. For example, when searching for "Activity", it will include Activity.entity,
+        Activity.plsql, Activity.views, etc.
+
+        Args:
+            query: Search query
+            limit: Maximum number of primary results
+            file_type: Filter by file type (optional)
+            min_complexity: Minimum complexity score (optional)
+            max_complexity: Maximum complexity score (optional)
+            include_related: Whether to include related files
+            max_related_per_lu: Maximum related files per logical unit
+
+        Returns:
+            List of search results including related files
+        """
+        # Get primary search results
+        primary_results = self.search_deduplicated(
+            query=query,
+            limit=limit,
+            file_type=file_type,
+            min_complexity=min_complexity,
+            max_complexity=max_complexity,
+        )
+
+        if not include_related or not primary_results:
+            return primary_results
+
+        # Collect unique logical units from primary results
+        logical_units = set()
+        primary_paths = set()
+
+        for result in primary_results:
+            primary_paths.add(result.path)
+            if result.logical_unit:
+                logical_units.add(result.logical_unit)
+
+        # Find related files for each logical unit
+        related_results = []
+
+        for lu in logical_units:
+            related_files = self.find_related_files(lu)
+
+            # Add related files not already in primary results
+            related_count = 0
+            for related in related_files:
+                if (
+                    related.path not in primary_paths
+                    and related_count < max_related_per_lu
+                ):
+                    # Reduce score slightly to indicate it's a related result
+                    related.score *= 0.8
+                    related_results.append(related)
+                    related_count += 1
+
+        # Combine and sort results
+        all_results = primary_results + related_results
+        all_results.sort(key=lambda x: x.score, reverse=True)
+
+        return all_results[
+            : limit * 2
+        ]  # Allow more results when including related files
+
+    def intelligent_search(
+        self,
+        query: str,
+        limit: int = 10,
+        include_related: bool = True,
+        boost_business_logic: bool = True,
+    ) -> List[SearchResult]:
+        """Perform intelligent search that combines index search with metadata ranking.
+
+        This is the recommended search method that:
+        1. Uses both index-based search and metadata-enhanced search
+        2. Automatically includes related files from the same logical unit
+        3. Applies business logic boosting for authorization queries
+        4. Provides comprehensive results ranked by relevance
+
+        Args:
+            query: Search query
+            limit: Maximum number of results
+            include_related: Include related files from same logical units
+            boost_business_logic: Apply extra boosting for business logic files
+
+        Returns:
+            List of intelligently ranked search results
+        """
+        # Step 1: Get enhanced search results if metadata is available
+        if self._enhanced_search_engine:
+            enhanced_results = self.enhanced_search(
+                query=query,
+                limit=limit,
+                include_related=include_related,
+                fuzzy_threshold=85.0,
+            )
+
+            # Convert enhanced results back to SearchResult format
+            results = []
+            for enhanced in enhanced_results:
+                # Find the corresponding file in the index to get full metadata
+                index_results = self.search_deduplicated(
+                    query=enhanced.file_path.split("/")[-1].split(".")[
+                        0
+                    ],  # filename without extension
+                    limit=1,
+                )
+
+                if index_results:
+                    result = index_results[0]
+                    # Apply enhanced confidence as score boost
+                    result.score = result.score * (enhanced.confidence / 100.0) * 2.0
+                    results.append(result)
+                else:
+                    # Create a basic result if not found in index
+                    results.append(
+                        SearchResult(
+                            path=enhanced.file_path,
+                            name=enhanced.file_path.split("/")[-1],
+                            type=f".{enhanced.content_type}",
+                            content_preview=enhanced.snippet,
+                            score=enhanced.confidence,
+                            entities=[],
+                            line_count=0,
+                            complexity_score=0.0,
+                            pagerank_score=0.0,
+                            modified_time=datetime.now(),
+                            hash="",
+                            module=enhanced.module,
+                            logical_unit=enhanced.logical_unit,
+                        )
+                    )
+
+            return results[:limit]
+
+        # Step 2: Fallback to index-only search with related files
+        else:
+            results = self.search_with_related_files(
+                query=query, limit=limit, include_related=include_related
+            )
+
+            # Apply business logic boosting if requested
+            if boost_business_logic:
+                results = self._apply_business_logic_boosting(query, results)
+
+            return results[:limit]
+
+    def _apply_business_logic_boosting(
+        self, query: str, results: List[SearchResult]
+    ) -> List[SearchResult]:
+        """Apply additional boosting for business logic files based on query context."""
+        query_lower = query.lower()
+
+        # Detect authorization-related queries
+        authorization_keywords = [
+            "authorize",
+            "authorization",
+            "approve",
+            "approval",
+            "reject",
+            "workflow",
+            "auth",
+            "permission",
+            "access",
+            "security",
+        ]
+
+        is_authorization_query = any(kw in query_lower for kw in authorization_keywords)
+
+        # Apply boosting
+        for result in results:
+            boost_factor = 1.0
+
+            # Boost .plsql files for authorization queries
+            if is_authorization_query and result.type == ".plsql":
+                boost_factor *= 2.0
+
+                # Extra boost for large business logic files
+                if result.line_count > 1000:
+                    boost_factor *= 1.5
+                elif result.line_count > 500:
+                    boost_factor *= 1.2
+
+            # Boost entity files for entity queries
+            elif result.type == ".entity" and result.name.lower().startswith(
+                query_lower
+            ):
+                boost_factor *= 1.5
+
+            # Apply the boost
+            result.score *= boost_factor
+
+        # Re-sort by score
+        results.sort(key=lambda x: x.score, reverse=True)
+        return results
+
     def search(
         self,
         query: str,
@@ -1095,13 +1341,11 @@ class IFSCloudTantivyIndexer:
         try:
             # Build boosted query that prioritizes filename and entity name matches
             boosted_queries = []
-            
+
             # 1. Highest priority: Exact filename matches (boost 10x)
             # For "Activity", this matches Activity.entity, Activity.plsql, etc.
             try:
-                filename_query = tantivy.Query.term_query(
-                    self._schema, "name", query
-                )
+                filename_query = tantivy.Query.term_query(self._schema, "name", query)
                 boosted_queries.append((tantivy.Occur.Should, filename_query))
             except Exception as e:
                 logger.debug(f"Failed to create filename query: {e}")
@@ -1165,12 +1409,18 @@ class IFSCloudTantivyIndexer:
                             )
                             fuzzy_queries.append((tantivy.Occur.Should, fuzzy_query))
                         except Exception as e:
-                            logger.debug(f"Failed to create fuzzy query for field {field_name}: {e}")
+                            logger.debug(
+                                f"Failed to create fuzzy query for field {field_name}: {e}"
+                            )
                             continue
 
                     if fuzzy_queries:
-                        combined_fuzzy_query = tantivy.Query.boolean_query(fuzzy_queries)
-                        boosted_queries.append((tantivy.Occur.Should, combined_fuzzy_query))
+                        combined_fuzzy_query = tantivy.Query.boolean_query(
+                            fuzzy_queries
+                        )
+                        boosted_queries.append(
+                            (tantivy.Occur.Should, combined_fuzzy_query)
+                        )
                 except Exception as e:
                     logger.debug(f"Fuzzy search failed: {e}")
 
@@ -1187,45 +1437,49 @@ class IFSCloudTantivyIndexer:
 
             # Convert to SearchResult objects with intelligent score boosting
             results = []
-            
+
             for score, doc_address in search_results.hits:
                 doc = searcher.doc(doc_address)
-                
+
                 # Apply additional scoring boost based on match type
                 final_score = score
                 filename = doc.get_first("name") or ""
                 entity_name = doc.get_first("entity_name") or ""
                 pagerank_score = doc.get_first("pagerank_score") or 0.0
-                
+
                 # Boost exact filename matches even higher
                 file_type = doc.get_first("type") or ""
-                
+
                 if filename.lower().startswith(query.lower()):
                     final_score *= 10.0  # 10x boost for filename prefix match
                 elif query.lower() in filename.lower():
-                    final_score *= 5.0   # 5x boost for filename contains match
+                    final_score *= 5.0  # 5x boost for filename contains match
                 elif entity_name and entity_name.lower() == query.lower():
-                    final_score *= 3.0   # 3x boost for exact entity name match
+                    final_score *= 3.0  # 3x boost for exact entity name match
                 elif entity_name and query.lower() in entity_name.lower():
-                    final_score *= 2.0   # 2x boost for entity name contains match
+                    final_score *= 2.0  # 2x boost for entity name contains match
 
                 # Special boost for .entity files when searching for entity names
                 # Entity files are the core definition and should rank highest
-                if (file_type == ".entity" and 
-                    (query.lower() in filename.lower() or 
-                     (entity_name and query.lower() in entity_name.lower()))):
-                    final_score *= 3.0   # Additional 3x boost for entity files
-                
+                if file_type == ".entity" and (
+                    query.lower() in filename.lower()
+                    or (entity_name and query.lower() in entity_name.lower())
+                ):
+                    final_score *= 3.0  # Additional 3x boost for entity files
+
                 # Additional file type prioritization for entity-related searches
                 elif file_type == ".plsql" and query.lower() in filename.lower():
-                    final_score *= 1.5   # Moderate boost for API files
-                elif file_type in [".views", ".client", ".projection"] and query.lower() in filename.lower():
-                    final_score *= 1.3   # Small boost for UI/view files
+                    final_score *= 1.5  # Moderate boost for API files
+                elif (
+                    file_type in [".views", ".client", ".projection"]
+                    and query.lower() in filename.lower()
+                ):
+                    final_score *= 1.3  # Small boost for UI/view files
                 # .storage files get no additional boost (they should rank lower)
 
                 # Apply PageRank boost (multiply by 1 + pagerank_score)
                 # This gives entities with higher PageRank a 0-100% boost
-                final_score *= (1.0 + pagerank_score)
+                final_score *= 1.0 + pagerank_score
 
                 search_result = SearchResult(
                     path=doc.get_first("path") or "",
@@ -1385,7 +1639,7 @@ class IFSCloudTantivyIndexer:
             "supported_extensions": list(self.SUPPORTED_EXTENSIONS),
         }
 
-    def _extract_module_info(self, file_path: Path) -> tuple[str, str]:
+    def _extract_module_info(self, file_path: Path) -> Tuple[str, str]:
         """Extract module and logical unit information from file path.
 
         Args:
@@ -1418,7 +1672,7 @@ class IFSCloudTantivyIndexer:
 
     def _extract_entity_info(
         self, content: str, file_type: str, entities: List[str]
-    ) -> tuple[str, str]:
+    ) -> Tuple[str, str]:
         """Extract primary entity name and component from file content.
 
         Args:
