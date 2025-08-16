@@ -19,7 +19,10 @@ from .enhanced_search import (
     SearchResult as EnhancedSearchResult,
 )
 from .metadata_extractor import MetadataManager
-from .intent_classifier import IntentClassifier, QueryIntent
+from .proper_fastai_classifier import (
+    FastAIIntentClassifier as IntentClassifier,
+    QueryIntent,
+)
 from .metadata_indexer import MetadataIndexer
 
 logger = logging.getLogger(__name__)
@@ -28,15 +31,27 @@ logger = logging.getLogger(__name__)
 class IFSCloudSearchEngine:
     """Main search engine for IFS Cloud files with metadata enhancement capabilities."""
 
-    def __init__(self, indexer: "IFSCloudIndexer", metadata_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        indexer: "IFSCloudIndexer",
+        metadata_dir: Optional[Path] = None,
+        enable_diversity: bool = True,
+        diversity_max_per_type: int = 3,
+    ):
         """
         Initialize the search engine.
 
         Args:
             indexer: IFSCloudIndexer instance for accessing the file index
             metadata_dir: Optional directory for metadata storage (defaults to index_path/metadata)
+            enable_diversity: Whether to apply diversity ranking to balance file types
+            diversity_max_per_type: Maximum number of each file type in diverse results
         """
         self.indexer = indexer
+
+        # Diversity configuration
+        self.enable_diversity = enable_diversity
+        self.diversity_max_per_type = diversity_max_per_type
 
         # Set up metadata directory
         if metadata_dir is None:
@@ -196,9 +211,11 @@ class IFSCloudSearchEngine:
             seen_paths = set()
 
             # 1. Get index-based results (traditional search) - prioritize this
+            # Increase multiplier to account for filtering stages: business ranking, diversity, post-filters
+            initial_limit = max(limit * 5, 50)  # Ensure minimum 50 results to work with
             index_results = self.indexer.search_deduplicated(
                 query=query,
-                limit=limit * 3,  # Get more results to allow for better merging
+                limit=initial_limit,  # Get more results to allow for filtering stages
                 file_type=None,  # Don't filter at indexer level, we'll filter later
                 min_complexity=min_complexity,
                 max_complexity=max_complexity,
@@ -210,7 +227,7 @@ class IFSCloudSearchEngine:
                 try:
                     metadata_search_results = self.metadata_indexer.search_metadata(
                         query=query,
-                        limit=limit * 2,
+                        limit=max(limit * 3, 30),  # Increased for filtering stages
                         file_types=[file_type] if file_type else None,
                         modules=[module] if module else None,
                     )
@@ -262,7 +279,9 @@ class IFSCloudSearchEngine:
                     seen_paths.add(result.path)
 
             # 2. Get metadata-enhanced results if available (but limit this)
-            if self.enhanced_search_engine and len(all_results) < limit * 2:
+            if (
+                self.enhanced_search_engine and len(all_results) < limit * 3
+            ):  # Increased threshold
                 try:
                     from .enhanced_search import SearchContext
 
@@ -276,8 +295,8 @@ class IFSCloudSearchEngine:
                     context = SearchContext(
                         query=query,
                         limit=max(
-                            10, limit
-                        ),  # Limit metadata search to prevent too many calls
+                            limit * 2, 20  # Increased for filtering, minimum 20
+                        ),  # More results to account for filtering stages
                         modules_filter=[module] if module else None,
                         content_types_filter=content_types_filter,
                         logical_units_filter=[logical_unit] if logical_unit else None,
@@ -289,8 +308,10 @@ class IFSCloudSearchEngine:
                         context
                     )
 
-                    # Convert enhanced results to SearchResult and merge (limit to prevent spam)
-                    for enhanced_result in enhanced_results[:limit]:
+                    # Convert enhanced results to SearchResult and merge (increased limit for filtering)
+                    for enhanced_result in enhanced_results[
+                        : limit * 2
+                    ]:  # Increased from limit to limit * 2
                         if enhanced_result.file_path not in seen_paths:
                             # Convert enhanced result to SearchResult
                             search_result = self._convert_enhanced_to_search_result(
@@ -309,7 +330,13 @@ class IFSCloudSearchEngine:
             # 3. Re-rank combined results using business logic
             all_results = self._apply_business_ranking(all_results, query)
 
-            # 4. Apply final filters that weren't handled by individual searches
+            # 4. Apply diversity ranking to balance file types (if enabled)
+            if self.enable_diversity:
+                all_results = self._apply_diversity_ranking(
+                    all_results, max_per_type=self.diversity_max_per_type
+                )
+
+            # 5. Apply final filters that weren't handled by individual searches
             filtered_results = self._apply_post_search_filters(
                 all_results,
                 file_type,
@@ -319,9 +346,24 @@ class IFSCloudSearchEngine:
                 max_complexity,
             )
 
-            # 5. Sort by final score and limit
+            # 6. Sort by final score and limit with safety check
             filtered_results.sort(key=lambda x: x.score, reverse=True)
-            return filtered_results[:limit]
+
+            # Safety check: If filtering reduced results significantly, log a warning
+            if len(filtered_results) < limit and len(all_results) >= limit:
+                reduction_ratio = len(filtered_results) / len(all_results)
+                if reduction_ratio < 0.3:  # If we lost more than 70% of results
+                    logger.warning(
+                        f"Heavy filtering reduced results from {len(all_results)} to {len(filtered_results)} "
+                        f"({reduction_ratio:.1%} retention). Consider adjusting filters."
+                    )
+
+            final_results = filtered_results[:limit]
+            logger.debug(
+                f"Search pipeline: {len(all_results)} pre-filter → {len(filtered_results)} post-filter → {len(final_results)} final"
+            )
+
+            return final_results
 
     def search_with_related_files(
         self,
@@ -341,9 +383,13 @@ class IFSCloudSearchEngine:
         like Activity.entity, Activity.plsql, Activity.views, etc.
         """
         # Get primary search results (use regular search method to apply filters)
+        # Request more results initially since we'll be adding related files
+        primary_limit = max(
+            limit * 2, 20
+        )  # Get more primary results to ensure good base
         primary_results = self.search(
             query=query,
-            limit=limit,
+            limit=primary_limit,  # Increased limit for better related file discovery
             file_type=file_type,
             min_complexity=min_complexity,
             max_complexity=max_complexity,
@@ -391,11 +437,25 @@ class IFSCloudSearchEngine:
 
         # Combine and sort results
         all_results = primary_results + related_results
+
+        # Apply diversity ranking to balance file types (if enabled)
+        if self.enable_diversity:
+            all_results = self._apply_diversity_ranking(
+                all_results, max_per_type=self.diversity_max_per_type + 1
+            )  # Slightly more allowance for related files
+
         all_results.sort(key=lambda x: x.score, reverse=True)
 
-        return all_results[
-            : limit * 2
-        ]  # Allow more results when including related files
+        # Calculate final limit - be more generous for related file searches
+        final_limit = limit * 2
+        final_results = all_results[:final_limit]
+
+        # Log the related file search results
+        logger.debug(
+            f"Related file search: {len(primary_results)} primary + {len(related_results)} related = {len(all_results)} total → {len(final_results)} final"
+        )
+
+        return final_results
 
     def find_related_files(
         self, logical_unit: str, include_extensions: Optional[List[str]] = None
@@ -1004,6 +1064,88 @@ ORDER BY module, lu_name, view_name
                     result.score *= 0.8  # Apply penalty to encourage diversity
 
         return results
+
+    def _apply_diversity_ranking(
+        self, results: List["SearchResult"], max_per_type: int = 3
+    ) -> List["SearchResult"]:
+        """
+        Apply diversity ranking to ensure balanced representation of different file types.
+
+        This prevents search results from being dominated by entity and views files
+        by limiting the number of each file type in the top results.
+
+        Args:
+            results: Search results to diversify
+            max_per_type: Maximum number of each file type to include in top results
+
+        Returns:
+            Reordered results with better diversity balance
+        """
+        if len(results) <= 5:  # Don't apply diversity to very small result sets
+            logger.debug(
+                f"Skipping diversity ranking - too few results ({len(results)})"
+            )
+            return results
+
+        # Define file type priority for diversity balance
+        # More practical/implementation files get priority
+        type_priority = {
+            ".plsql": 1,  # Business logic - highest priority
+            ".client": 2,  # UI implementation - high priority
+            ".projection": 3,  # API layer - medium-high priority
+            ".views": 4,  # Data access - medium priority
+            ".entity": 5,  # Schema - lower priority
+            ".fragment": 6,  # UI components - lower priority
+            ".storage": 7,  # Database - lowest priority
+        }
+
+        # Sort results by score first
+        sorted_results = sorted(results, key=lambda x: x.score, reverse=True)
+
+        # Apply diversity balancing
+        type_counts = {}
+        diverse_results = []
+        overflow_results = []
+
+        # Adjust diversity window based on total results available
+        diversity_window = min(
+            20, len(results)
+        )  # Use up to 20 results for diversity, or all if fewer
+
+        for result in sorted_results:
+            file_type = result.type or "unknown"
+            current_count = type_counts.get(file_type, 0)
+
+            # For diversity window, enforce diversity limits
+            if len(diverse_results) < diversity_window and current_count < max_per_type:
+                diverse_results.append(result)
+                type_counts[file_type] = current_count + 1
+            else:
+                overflow_results.append(result)
+
+        # Sort overflow by type priority and score
+        overflow_results.sort(
+            key=lambda x: (
+                type_priority.get(x.type, 999),  # File type priority
+                -x.score,  # Then by score (descending)
+            )
+        )
+
+        # Combine diverse results with overflow
+        final_results = diverse_results + overflow_results
+
+        logger.debug(
+            f"Diversity applied to {len(results)} results: {len(diverse_results)} diverse, {len(overflow_results)} overflow"
+        )
+        if logger.isEnabledFor(logging.DEBUG):
+            type_distribution = {}
+            display_count = min(15, len(final_results))
+            for result in final_results[:display_count]:
+                t = result.type or "unknown"
+                type_distribution[t] = type_distribution.get(t, 0) + 1
+            logger.debug(f"Top {display_count} type distribution: {type_distribution}")
+
+        return final_results
 
     def _apply_post_search_filters(
         self,
