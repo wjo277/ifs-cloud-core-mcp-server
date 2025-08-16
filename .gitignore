@@ -94,3 +94,7 @@ production/indexes/
 
 # Legacy database configuration (moved to production/)
 database_config.py
+
+# ML Models (downloaded from releases)
+src/ifs_cloud_mcp_server/models/
+*.pkl

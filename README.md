@@ -377,12 +377,39 @@ uv run python -m src.ifs_cloud_mcp_server.main
 git clone https://github.com/graknol/ifs-cloud-core-mcp-server.git
 cd ifs-cloud-core-mcp-server
 
-# Install dependencies
+# Install dependencies with UV (recommended)
+uv sync
+
+# Or with pip
 pip install -e .
 
 # For development
 pip install -e ".[dev]"
 ```
+
+### 🤖 **AI Intent Classification Models**
+
+The server uses FastAI models for intelligent query classification. Models are automatically downloaded from GitHub releases when first needed:
+
+```bash
+# Models download automatically, but you can also:
+
+# Download manually
+uv run python -m src.ifs_cloud_mcp_server.model_downloader
+
+# Train your own model (optional)
+uv run python scripts/train_proper_fastai.py
+
+# Prepare model for release (maintainers)
+uv run python scripts/prepare_model_release.py
+```
+
+**Model Details:**
+
+- **Size**: ~121MB (FastAI ULMFiT model)
+- **Storage**: Downloaded from GitHub releases (not in repo)
+- **Fallback**: Graceful degradation if model unavailable
+- **GPU Support**: Automatic CUDA detection and acceleration
 
 ## Quick Start
 
