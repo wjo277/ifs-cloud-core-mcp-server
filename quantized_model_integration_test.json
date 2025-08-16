@@ -1,0 +1,350 @@
+{
+  "results": {
+    "original": {
+      "predictions": [
+        {
+          "query": "customer order authorization workflow",
+          "intent": "business_logic",
+          "confidence": 1.0,
+          "time_ms": 38.6904000188224
+        },
+        {
+          "query": "invoice approval process validation",
+          "intent": "business_logic",
+          "confidence": 0.7696894407272339,
+          "time_ms": 24.273900024127215
+        },
+        {
+          "query": "purchase order entity definition",
+          "intent": "entity_definition",
+          "confidence": 1.0,
+          "time_ms": 22.0846000011079
+        },
+        {
+          "query": "sales order data structure schema",
+          "intent": "general",
+          "confidence": 0.9999375343322754,
+          "time_ms": 25.03159997286275
+        },
+        {
+          "query": "order handling user interface",
+          "intent": "api_integration",
+          "confidence": 1.0,
+          "time_ms": 21.777799993287772
+        },
+        {
+          "query": "customer search form design",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 22.86860003368929
+        },
+        {
+          "query": "REST API customer projection",
+          "intent": "api_integration",
+          "confidence": 1.0,
+          "time_ms": 24.904999998398125
+        },
+        {
+          "query": "web service order integration",
+          "intent": "business_logic",
+          "confidence": 1.0,
+          "time_ms": 23.221900046337396
+        },
+        {
+          "query": "order history database view",
+          "intent": "business_logic",
+          "confidence": 1.0,
+          "time_ms": 21.441099990624934
+        },
+        {
+          "query": "sales report generation query",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 21.47460001287982
+        },
+        {
+          "query": "authorization error debugging",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 22.70099997986108
+        },
+        {
+          "query": "performance issue investigation",
+          "intent": "entity_definition",
+          "confidence": 1.0,
+          "time_ms": 22.04499999061227
+        },
+        {
+          "query": "IFS Cloud general architecture",
+          "intent": "api_integration",
+          "confidence": 1.0,
+          "time_ms": 20.328200014773756
+        },
+        {
+          "query": "system configuration overview",
+          "intent": "general",
+          "confidence": 0.9997162222862244,
+          "time_ms": 20.60180000262335
+        },
+        {
+          "query": "business logic validation rules",
+          "intent": "data_access",
+          "confidence": 0.9999793767929077,
+          "time_ms": 20.513799972832203
+        },
+        {
+          "query": "entity relationship mapping",
+          "intent": "entity_definition",
+          "confidence": 1.0,
+          "time_ms": 20.577299990691245
+        },
+        {
+          "query": "user interface navigation menu",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 21.732699999120086
+        },
+        {
+          "query": "API endpoint documentation",
+          "intent": "api_integration",
+          "confidence": 1.0,
+          "time_ms": 21.58130001043901
+        },
+        {
+          "query": "database view optimization",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 22.250299982260913
+        },
+        {
+          "query": "system troubleshooting guide",
+          "intent": "entity_definition",
+          "confidence": 1.0,
+          "time_ms": 22.50979997916147
+        }
+      ],
+      "times": [
+        38.6904000188224,
+        24.273900024127215,
+        22.0846000011079,
+        25.03159997286275,
+        21.777799993287772,
+        22.86860003368929,
+        24.904999998398125,
+        23.221900046337396,
+        21.441099990624934,
+        21.47460001287982,
+        22.70099997986108,
+        22.04499999061227,
+        20.328200014773756,
+        20.60180000262335,
+        20.513799972832203,
+        20.577299990691245,
+        21.732699999120086,
+        21.58130001043901,
+        22.250299982260913,
+        22.50979997916147
+      ],
+      "total_time": 460.70059994235635
+    },
+    "quantized": {
+      "predictions": [
+        {
+          "query": "customer order authorization workflow",
+          "intent": "business_logic",
+          "confidence": 1.0,
+          "time_ms": 21.70580002712086
+        },
+        {
+          "query": "invoice approval process validation",
+          "intent": "data_access",
+          "confidence": 0.9999964237213135,
+          "time_ms": 19.76019999710843
+        },
+        {
+          "query": "purchase order entity definition",
+          "intent": "entity_definition",
+          "confidence": 1.0,
+          "time_ms": 18.509200017433614
+        },
+        {
+          "query": "sales order data structure schema",
+          "intent": "business_logic",
+          "confidence": 1.0,
+          "time_ms": 18.021900032181293
+        },
+        {
+          "query": "order handling user interface",
+          "intent": "api_integration",
+          "confidence": 1.0,
+          "time_ms": 18.632100021932274
+        },
+        {
+          "query": "customer search form design",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 17.52719999058172
+        },
+        {
+          "query": "REST API customer projection",
+          "intent": "api_integration",
+          "confidence": 1.0,
+          "time_ms": 18.167699978221208
+        },
+        {
+          "query": "web service order integration",
+          "intent": "business_logic",
+          "confidence": 1.0,
+          "time_ms": 16.813900030683726
+        },
+        {
+          "query": "order history database view",
+          "intent": "business_logic",
+          "confidence": 1.0,
+          "time_ms": 16.571099986322224
+        },
+        {
+          "query": "sales report generation query",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 16.84439997188747
+        },
+        {
+          "query": "authorization error debugging",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 17.333699972368777
+        },
+        {
+          "query": "performance issue investigation",
+          "intent": "entity_definition",
+          "confidence": 1.0,
+          "time_ms": 17.246700008399785
+        },
+        {
+          "query": "IFS Cloud general architecture",
+          "intent": "api_integration",
+          "confidence": 1.0,
+          "time_ms": 17.512899998109788
+        },
+        {
+          "query": "system configuration overview",
+          "intent": "business_logic",
+          "confidence": 0.9611000418663025,
+          "time_ms": 21.053799951914698
+        },
+        {
+          "query": "business logic validation rules",
+          "intent": "business_logic",
+          "confidence": 0.8311366438865662,
+          "time_ms": 17.06799998646602
+        },
+        {
+          "query": "entity relationship mapping",
+          "intent": "entity_definition",
+          "confidence": 1.0,
+          "time_ms": 16.31380000617355
+        },
+        {
+          "query": "user interface navigation menu",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 17.0203999732621
+        },
+        {
+          "query": "API endpoint documentation",
+          "intent": "api_integration",
+          "confidence": 1.0,
+          "time_ms": 18.79100000951439
+        },
+        {
+          "query": "database view optimization",
+          "intent": "data_access",
+          "confidence": 1.0,
+          "time_ms": 16.294100030791014
+        },
+        {
+          "query": "system troubleshooting guide",
+          "intent": "entity_definition",
+          "confidence": 1.0,
+          "time_ms": 17.651500005740672
+        }
+      ],
+      "times": [
+        21.70580002712086,
+        19.76019999710843,
+        18.509200017433614,
+        18.021900032181293,
+        18.632100021932274,
+        17.52719999058172,
+        18.167699978221208,
+        16.813900030683726,
+        16.571099986322224,
+        16.84439997188747,
+        17.333699972368777,
+        17.246700008399785,
+        17.512899998109788,
+        21.053799951914698,
+        17.06799998646602,
+        16.31380000617355,
+        17.0203999732621,
+        18.79100000951439,
+        16.294100030791014,
+        17.651500005740672
+      ],
+      "total_time": 358.93080005189404
+    }
+  },
+  "analysis": {
+    "performance": {
+      "original_avg_time_ms": 23.03,
+      "quantized_avg_time_ms": 17.94,
+      "original_median_time_ms": 22.06,
+      "quantized_median_time_ms": 17.52,
+      "speedup_factor": 1.28,
+      "speedup_percent": 22.1
+    },
+    "accuracy": {
+      "total_queries": 20,
+      "different_predictions": 4,
+      "accuracy_retention": 80.0,
+      "avg_confidence_diff": 0.0219,
+      "max_confidence_diff": 0.2303
+    },
+    "intent_changes": [
+      {
+        "query": "invoice approval process validation",
+        "original": "business_logic",
+        "quantized": "data_access",
+        "orig_confidence": 0.7696894407272339,
+        "quan_confidence": 0.9999964237213135
+      },
+      {
+        "query": "sales order data structure schema",
+        "original": "general",
+        "quantized": "business_logic",
+        "orig_confidence": 0.9999375343322754,
+        "quan_confidence": 1.0
+      },
+      {
+        "query": "system configuration overview",
+        "original": "general",
+        "quantized": "business_logic",
+        "orig_confidence": 0.9997162222862244,
+        "quan_confidence": 0.9611000418663025
+      },
+      {
+        "query": "business logic validation rules",
+        "original": "data_access",
+        "quantized": "business_logic",
+        "orig_confidence": 0.9999793767929077,
+        "quan_confidence": 0.8311366438865662
+      }
+    ],
+    "file_sizes": {
+      "original_mb": 121.12,
+      "quantized_mb": 63.01,
+      "reduction_percent": 48.0
+    }
+  }
+}

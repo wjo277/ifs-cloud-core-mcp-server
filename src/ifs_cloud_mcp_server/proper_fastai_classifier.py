@@ -54,6 +54,7 @@ class FastAIIntentClassifier:
         self,
         model_path: Optional[str] = None,
         use_gpu: Optional[bool] = None,
+        use_quantized: bool = True,  # Default to quantized for better performance
     ):
         """Initialize the FastAI classifier."""
         # Device configuration
@@ -61,7 +62,9 @@ class FastAIIntentClassifier:
             use_gpu = torch.cuda.is_available()
 
         self.use_gpu = use_gpu
+        self.use_quantized = use_quantized
         logger.info(f"Using GPU: {use_gpu}")
+        logger.info(f"Using quantized model: {use_quantized}")
 
         # Model paths
         self.model_dir = (
@@ -84,24 +87,36 @@ class FastAIIntentClassifier:
 
     def _load_model(self):
         """Load existing FastAI model if available, downloading from release if needed."""
-        # First check if model exists locally
-        model_file = self.model_dir / "export.pkl"
+        # Choose model file based on quantization preference
+        if self.use_quantized:
+            model_file = self.model_dir / "export_quantized.pkl"
+            fallback_file = self.model_dir / "export.pkl"
+        else:
+            model_file = self.model_dir / "export.pkl"
+            fallback_file = None
+
+        # Try quantized model first if requested, fallback to original
+        if not model_file.exists() and fallback_file and fallback_file.exists():
+            logger.info(f"Quantized model not found, falling back to original model")
+            model_file = fallback_file
 
         if not model_file.exists():
-            # Try to download from GitHub releases
+            # Try to download from GitHub releases - prefer quantized
             logger.info(
                 "Model not found locally, attempting to download from releases..."
             )
-            if ensure_model_available():
-                # The downloader puts the model in the standard location
-                downloaded_model = get_model_path()
-                if downloaded_model.exists():
-                    # Copy to our expected location if different
-                    if downloaded_model != model_file:
-                        import shutil
-
-                        shutil.copy2(downloaded_model, model_file)
-                        logger.info(f"Copied downloaded model to {model_file}")
+            if ensure_model_available(use_quantized=self.use_quantized):
+                # The downloader puts the model in the expected location
+                if model_file.exists():
+                    logger.info(f"Successfully downloaded model to {model_file}")
+                elif fallback_file and fallback_file.exists():
+                    logger.info(f"Downloaded fallback model to {fallback_file}")
+                    model_file = fallback_file
+                else:
+                    logger.warning(
+                        "Download appeared successful but model file not found"
+                    )
+                    return
             else:
                 logger.warning("Failed to download model from releases")
                 return
@@ -126,7 +141,13 @@ class FastAIIntentClassifier:
 
                 self.learner = load_learner(model_file)
                 self.is_trained = True
-                logger.info("✅ Loaded FastAI model successfully")
+                model_type = (
+                    "quantized" if "quantized" in str(model_file) else "original"
+                )
+                model_size = model_file.stat().st_size / (1024 * 1024)
+                logger.info(
+                    f"✅ Loaded FastAI {model_type} model successfully ({model_size:.1f} MB)"
+                )
             except Exception as e:
                 logger.warning(f"Failed to load FastAI model: {e}")
                 self.is_trained = False
