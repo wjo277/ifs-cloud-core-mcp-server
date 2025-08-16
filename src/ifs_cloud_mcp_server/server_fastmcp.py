@@ -7,7 +7,7 @@ from datetime import datetime
 
 from fastmcp import FastMCP
 
-from .indexer import IFSCloudTantivyIndexer, SearchResult
+from .indexer import IFSCloudIndexer, SearchResult
 from .config import ConfigManager
 from .plsql_analyzer import ConservativePLSQLAnalyzer
 from .client_analyzer import ConservativeClientAnalyzer
@@ -32,7 +32,7 @@ class IFSCloudMCPServer:
         """
         self.name = name
         self.mcp = FastMCP(name)
-        self.indexer = IFSCloudTantivyIndexer(index_path)
+        self.indexer = IFSCloudIndexer(index_path)
         self.config_manager = ConfigManager()
 
         # Initialize analyzers for comprehensive code understanding

@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from .indexer import IFSCloudTantivyIndexer, SearchResult
+from .indexer import IFSCloudIndexer, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ class IFSCloudWebUI:
     """Web UI application for IFS Cloud search."""
 
     def __init__(self, index_path: str = "./index"):
-        self.indexer = IFSCloudTantivyIndexer(index_path)
+        self.indexer = IFSCloudIndexer(index_path)
         self.app = FastAPI(
             title="IFS Cloud Explorer",
             description="Web UI for exploring IFS Cloud codebases with intelligent search",

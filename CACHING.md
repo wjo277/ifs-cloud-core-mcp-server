@@ -71,7 +71,7 @@ New MCP tools for cache management:
 
 ```python
 # First time indexing (cold start)
-indexer = IFSCloudTantivyIndexer("./ifs_index")
+indexer = IFSCloudIndexer("./ifs_index")
 stats = await indexer.index_directory("/path/to/ifs/codes")
 # Result: All files indexed
 
@@ -142,8 +142,8 @@ The cache location is tied to the index path:
 
 ```python
 # Different index paths = different caches
-indexer1 = IFSCloudTantivyIndexer("./project1_index")  # Cache in ./project1_index/
-indexer2 = IFSCloudTantivyIndexer("./project2_index")  # Cache in ./project2_index/
+indexer1 = IFSCloudIndexer("./project1_index")  # Cache in ./project1_index/
+indexer2 = IFSCloudIndexer("./project2_index")  # Cache in ./project2_index/
 ```
 
 ## Performance Characteristics
@@ -167,10 +167,10 @@ indexer2 = IFSCloudTantivyIndexer("./project2_index")  # Cache in ./project2_ind
 
 ```python
 # Good: Use consistent paths
-indexer = IFSCloudTantivyIndexer("~/.ifs_cloud_cache/main_index")
+indexer = IFSCloudIndexer("~/.ifs_cloud_cache/main_index")
 
 # Avoid: Temporary or changing paths
-indexer = IFSCloudTantivyIndexer(f"./temp_{random_id}")
+indexer = IFSCloudIndexer(f"./temp_{random_id}")
 ```
 
 ### 2. Regular Cache Cleanup
@@ -210,7 +210,7 @@ if cache_hit_ratio < 0.8:
 
 ```python
 # Force complete re-index (ignores cache)
-indexer = IFSCloudTantivyIndexer("./index", create_new=True)
+indexer = IFSCloudIndexer("./index", create_new=True)
 stats = await indexer.index_directory("/path", force_reindex=True)
 ```
 

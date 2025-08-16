@@ -130,9 +130,9 @@ def run_web_ui(args):
 
 async def manage_index(args):
     """Manage the search index."""
-    from src.ifs_cloud_mcp_server.indexer import IFSCloudTantivyIndexer
+    from src.ifs_cloud_mcp_server.indexer import IFSCloudIndexer
 
-    indexer = IFSCloudTantivyIndexer(args.index_path)
+    indexer = IFSCloudIndexer(args.index_path)
 
     if args.action == "stats":
         print("📊 Index Statistics:")

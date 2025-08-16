@@ -11,7 +11,7 @@ from typing import Set
 
 from .config import ConfigManager
 from .server_fastmcp import IFSCloudMCPServer
-from .indexer import IFSCloudTantivyIndexer
+from .indexer import IFSCloudIndexer
 
 
 def setup_logging(level: str = "INFO"):
@@ -174,7 +174,7 @@ async def build_index_for_extract(extract_path: Path, index_path: Path) -> bool:
         )
 
         # Create indexer
-        indexer = IFSCloudTantivyIndexer(index_path=index_path)
+        indexer = IFSCloudIndexer(index_path=index_path)
 
         # Build index
         stats = await indexer.index_directory(str(extract_path))

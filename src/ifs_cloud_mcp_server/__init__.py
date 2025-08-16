@@ -18,9 +18,9 @@ except ImportError:
     pass
 
 try:
-    from .indexer import IFSCloudTantivyIndexer
+    from .indexer import IFSCloudIndexer
 
-    __all__.append("IFSCloudTantivyIndexer")
+    __all__.append("IFSCloudIndexer")
 except ImportError:
     pass
 

@@ -64,7 +64,7 @@ class SearchResult(BaseModel):
         json_encoders = {datetime: lambda v: v.isoformat()}
 
 
-class IFSCloudTantivyIndexer:
+class IFSCloudIndexer:
     """High-performance Tantivy-based indexer for IFS Cloud files."""
 
     # Supported IFS Cloud file extensions
