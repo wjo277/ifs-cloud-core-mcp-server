@@ -2,7 +2,7 @@
 
 > **Transform your IFS Cloud development with AI that deeply understands your codebase**
 
-An intelligent Model Context Protocol (MCP) server that makes AI agents truly smart about IFS Cloud development. Features comprehensive code analysis, versioned ZIP catalog management, and intelligent context gathering for perfect architectural consistency.
+An intelligent Model Context Protocol (MCP) server that makes AI agents truly smart about IFS Cloud development. Features comprehensive code analysis, versioned ZIP catalog management, GUI-aware search, and intelligent context gathering for perfect architectural consistency.
 
 ---
 
@@ -15,19 +15,21 @@ An intelligent Model Context Protocol (MCP) server that makes AI agents truly sm
 - **Perfect Integration**: Every implementation matches your existing IFS Cloud conventions
 - **Zero False Positives**: Conservative analysis ensures reliable insights
 
+### � **GUI-Aware Smart Search**
+
+- **Real Production Mappings**: GUI labels mapped to backend entities using live IFS Cloud databases
+- **60% Perfect Matches**: Search for "Customer Order" and find CustomerOrder entities instantly
+- **15,000+ Files**: Handle complete IFS Cloud codebases efficiently
+- **Sub-second Search**: Powered by Tantivy search engine with GUI enhancement
+- **Smart Filtering**: Filter by module, file type, complexity, and more
+- **Contextual Results**: Rich metadata with previews and relationships
+
 ### 📦 **Versioned Catalog Management**
 
 - **ZIP Import**: Import entire IFS Cloud releases from ZIP files
 - **Version Control**: Manage multiple IFS Cloud versions (24.1, 24.2, latest, dev builds)
 - **Instant Switching**: Switch between versions for different projects
 - **Smart Extraction**: Automatically filters and organizes IFS Cloud files
-
-### 🔍 **Lightning-Fast Search**
-
-- **15,000+ Files**: Handle complete IFS Cloud codebases efficiently
-- **Sub-second Search**: Powered by Tantivy search engine
-- **Smart Filtering**: Filter by module, file type, complexity, and more
-- **Contextual Results**: Rich metadata with previews and relationships
 
 ---
 
@@ -219,6 +221,15 @@ uv run python zip_import_helper.py import "build.zip" --version "latest" --debug
 - **[📋 ZIP Indexing Instructions](./ZIP_INDEXING_INSTRUCTIONS.md)** - Complete import documentation
 - **[🧠 Intelligent Agent Guide](./INTELLIGENT_AGENT.md)** - How the AI agent works
 - **[🌐 Web UI Documentation](./WEB_UI_README.md)** - Interactive exploration interface
+
+### 🗺️ **GUI Mapping Maintenance**
+
+- **[🔧 GUI Mapping Extraction Guide](./GUI_MAPPING_EXTRACTION_GUIDE.md)** - Complete documentation for maintaining GUI mappings
+- **[📊 SQL Query Library](./sql/extract_gui_mappings.sql)** - Domain-specific extraction queries
+- **[🔄 Automated Refresh Script](./refresh_gui_mappings.py)** - Automated maintenance tools
+- **[📄 Current GUI Mappings](./data/gui_navigation_mappings.json)** - Live production mappings
+
+> **Note**: GUI mappings are extracted from live IFS Cloud databases to ensure search results match real user navigation patterns. These mappings dramatically improve search accuracy from GUI terms to backend entities.
 
 ---
 

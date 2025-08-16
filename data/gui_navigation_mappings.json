@@ -1,0 +1,222 @@
+{
+  "gui_to_entity": {
+    "access to protected persons": [
+      "ApplicationUser",
+      "PartyAdminUser"
+    ],
+    "active work orders": [
+      "ActivityAll",
+      "Activity",
+      "ActiveSeparate",
+      "ActivityProjConnect",
+      "ActiveWorkOrderUiv",
+      "ActiveSeparateCustomerOrder"
+    ],
+    "customer order": [
+      "CustomerOrderLine",
+      "CustomerOrder"
+    ],
+    "purchase order": [
+      "PurchaseOrderLine",
+      "PurchaseOrder"
+    ],
+    "project transaction": [
+      "ProjectTransactionPosting",
+      "ProjectTransaction"
+    ],
+    "expense sheet": [
+      "ExpenseDetail",
+      "ExpenseHeader"
+    ],
+    "employee information": [
+      "CompanyPerson",
+      "Person"
+    ],
+    "activity creation": [
+      "ActivityEstimate",
+      "Activity"
+    ],
+    "part information": [
+      "InventoryPart",
+      "PurchasePart",
+      "SalesPart"
+    ],
+    "supplier information": [
+      "SupplierInfo",
+      "Supplier"
+    ],
+    "sales order": [
+      "CustomerOrderLine",
+      "CustomerOrder"
+    ],
+    "work order": [
+      "JtTask",
+      "ActiveWorkOrder"
+    ],
+    "equipment object": [
+      "EquipmentObject",
+      "MaintenanceObject"
+    ]
+  },
+  "gui_to_projection": {
+    "access to protected persons": [
+      "AccessToProtectedPersonsHandling"
+    ],
+    "active work orders": [
+      "ActiveWorkOrdersHandling"
+    ],
+    "customer order": [
+      "CustomerOrderHandling"
+    ],
+    "purchase order": [
+      "PurchaseOrderHandling"
+    ],
+    "project transaction": [
+      "ProjectTransactionHandling"
+    ],
+    "expense sheet": [
+      "ExpenseSheetHandling"
+    ],
+    "employee information": [
+      "PersonHandling"
+    ],
+    "activity creation": [
+      "ActivityHandling"
+    ],
+    "part information": [
+      "PartHandling"
+    ],
+    "supplier information": [
+      "SupplierHandling"
+    ],
+    "sales order": [
+      "SalesOrderHandling"
+    ],
+    "work order": [
+      "WorkOrderHandling"
+    ],
+    "equipment object": [
+      "EquipmentHandling"
+    ]
+  },
+  "entity_synonyms": {
+    "applicationuser": [
+      "ApplicationUser",
+      "application_user"
+    ],
+    "partyadminuser": [
+      "PartyAdminUser",
+      "party_admin_user"
+    ],
+    "activeseparate": [
+      "ActiveSeparate",
+      "active_separate"
+    ],
+    "activeseparatecustomerorder": [
+      "active_separate_customer_order",
+      "ActiveSeparateCustomerOrder"
+    ],
+    "activeworkorderuiv": [
+      "active_work_order_uiv",
+      "ActiveWorkOrderUiv"
+    ],
+    "activity": [
+      "activity",
+      "Activity"
+    ],
+    "activityall": [
+      "ActivityAll",
+      "activity_all"
+    ],
+    "activityprojconnect": [
+      "ActivityProjConnect",
+      "activity_proj_connect"
+    ],
+    "customerorderline": [
+      "CustomerOrderLine",
+      "customer_order_line"
+    ],
+    "customerorder": [
+      "customer_order",
+      "CustomerOrder"
+    ],
+    "purchaseorder": [
+      "purchase_order",
+      "PurchaseOrder"
+    ],
+    "purchaseorderline": [
+      "purchase_order_line",
+      "PurchaseOrderLine"
+    ],
+    "projecttransaction": [
+      "project_transaction",
+      "ProjectTransaction"
+    ],
+    "projecttransactionposting": [
+      "ProjectTransactionPosting",
+      "project_transaction_posting"
+    ],
+    "expenseheader": [
+      "ExpenseHeader",
+      "expense_header"
+    ],
+    "expensedetail": [
+      "ExpenseDetail",
+      "expense_detail"
+    ],
+    "companyperson": [
+      "CompanyPerson",
+      "company_person"
+    ],
+    "person": [
+      "person",
+      "Person"
+    ],
+    "activityestimate": [
+      "ActivityEstimate",
+      "activity_estimate"
+    ],
+    "inventorypart": [
+      "inventory_part",
+      "InventoryPart"
+    ],
+    "purchasepart": [
+      "PurchasePart",
+      "purchase_part"
+    ],
+    "salespart": [
+      "SalesPart",
+      "sales_part"
+    ],
+    "supplier": [
+      "supplier",
+      "Supplier"
+    ],
+    "supplierinfo": [
+      "SupplierInfo",
+      "supplier_info"
+    ],
+    "activeworkorder": [
+      "active_work_order",
+      "ActiveWorkOrder"
+    ],
+    "jttask": [
+      "JtTask",
+      "jt_task"
+    ],
+    "equipmentobject": [
+      "EquipmentObject",
+      "equipment_object"
+    ],
+    "maintenanceobject": [
+      "maintenance_object",
+      "MaintenanceObject"
+    ]
+  },
+  "projection_patterns": {},
+  "metadata": {
+    "extraction_date": "2025-08-16",
+    "source_query": "FND_NAVIGATOR_ALL + MD_PROJECTION_ENTITYSET",
+    "total_mappings": 13
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "version": "1.0",
+  "generated_at": "2025-08-16T00:00:00Z",
+  "description": "GUI-to-backend navigation mappings extracted from IFS Cloud metadata",
+  "mappings": [
+    {
+      "gui_label": "Employee File",
+      "entity_name": "CompanyPerson",
+      "projection": "CompanyPersonHandling",
+      "client": "CompanyPersons",
+      "synonyms": [
+        "employee",
+        "companyperson",
+        "personnel",
+        "staff",
+        "worker",
+        "employee file",
+        "company person",
+        "person",
+        "file"
+      ],
+      "search_terms": [
+        "employee file",
+        "companyperson",
+        "company person",
+        "employee",
+        "employee management",
+        "employee maintenance",
+        "employee data"
+      ]
+    },
+    {
+      "gui_label": "Project Transactions",
+      "entity_name": "ProjectTransaction",
+      "projection": "ProjectTransactionHandling",
+      "client": "ProjectTransactions",
+      "synonyms": [
+        "project transaction",
+        "projecttransaction",
+        "project transactions",
+        "project",
+        "task",
+        "job",
+        "work",
+        "transactions"
+      ],
+      "search_terms": [
+        "project transactions",
+        "projecttransaction",
+        "project transaction"
+      ]
+    },
+    {
+      "gui_label": "Activity Management",
+      "entity_name": "Activity",
+      "projection": "ActivityHandling",
+      "client": "Activities",
+      "synonyms": [
+        "activity",
+        "management",
+        "activity management"
+      ],
+      "search_terms": [
+        "activity management",
+        "activity",
+        "activity"
+      ]
+    },
+    {
+      "gui_label": "Expense Sheets",
+      "entity_name": "ExpenseHeader",
+      "projection": "ExpenseSheetHandling",
+      "client": "ExpenseSheets",
+      "synonyms": [
+        "expense sheets",
+        "expenseheader",
+        "sheets",
+        "expense header",
+        "expense"
+      ],
+      "search_terms": [
+        "expense sheets",
+        "expenseheader",
+        "expense header"
+      ]
+    }
+  ]
+}

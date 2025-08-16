@@ -95,10 +95,54 @@ class IFSCloudTantivyIndexer:
         self._file_cache: Dict[str, FileMetadata] = {}
         self._load_cache_metadata()
 
+        # GUI to backend navigation mappings
+        self._gui_mappings: Dict[str, List[Dict[str, str]]] = {}
+        self._load_gui_navigation_mappings()
+
         self._schema = self._create_schema()
         self._index = self._create_or_open_index(create_new)
         self._writer = None  # Will be created on demand
         self._parser = IFSFileParser()
+
+    def _load_gui_navigation_mappings(self) -> None:
+        """Load GUI navigation mappings from generated data file."""
+        gui_mappings_file = (
+            Path(__file__).parent.parent.parent
+            / "data"
+            / "gui_navigation_mappings.json"
+        )
+
+        if not gui_mappings_file.exists():
+            logger.warning(
+                f"GUI navigation mappings file not found: {gui_mappings_file}"
+            )
+            self._gui_mappings = {}
+            return
+
+        try:
+            import json
+
+            with open(gui_mappings_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Process new format mappings
+            self._gui_mappings = {
+                "gui_to_entity": data.get("gui_to_entity", {}),
+                "entity_synonyms": data.get("entity_synonyms", {}),
+                "gui_to_projection": data.get("gui_to_projection", {}),
+            }
+
+            logger.info(
+                f"Loaded GUI mappings: {len(self._gui_mappings['gui_to_entity'])} GUI labels, {len(self._gui_mappings['entity_synonyms'])} entity synonym groups"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to load GUI mappings: {e}")
+            self._gui_mappings = {}
+
+        except Exception as e:
+            logger.error(f"Failed to load GUI navigation mappings: {e}")
+            self._gui_mappings = {}
 
         logger.info(f"Initialized Tantivy indexer at {self.index_path}")
         logger.info(f"Cache contains {len(self._file_cache)} file entries")
@@ -446,17 +490,85 @@ class IFSCloudTantivyIndexer:
         """
         import re
 
-        # Entity name synonym mappings (based on analysis findings)
+        # Enhanced entity name synonym mappings with GUI mappings and action patterns
         entity_synonyms = {
             "expensesheet": ["expenseheader", "expense_header", "trvexp"],
             "expense_sheet": ["expenseheader", "expense_header", "trvexp"],
             "expenseheader": ["expensesheet", "expense_sheet"],
             "expense_header": ["expensesheet", "expense_sheet"],
-            # Add more mappings as discovered through usage analysis
+            # Project domain patterns
+            "project": ["project", "proj"],
+            "transaction": ["transaction", "trans"],
+            "posting": ["posting", "post"],
+            # Activity domain patterns
+            "activity": ["activity", "act"],
+            "creation": ["creation", "create", "new", "add"],
+            # Detail/line patterns
+            "lines": ["detail", "line", "item"],
+            "detail": ["lines", "line", "item"],
+            "sheet": ["header", "main", "master"],
+            # Payment domain patterns
+            "payment": ["payment", "pay", "payable"],
+            "modification": ["modification", "modify", "change", "update"],
+            "authorization": ["authorization", "authorize", "approval", "approve"],
+            # Item/Part domain patterns
+            "item": ["part", "inventory", "catalog"],
+            "part": ["item", "inventory", "catalog"],
+            "global": ["catalog", "master", "central"],
+            "company": ["org", "organization"],
+            "stocking": ["inventory", "stock"],
+            "purchase": ["purchasing", "procurement", "buy"],
+            "rules": ["rule", "policy", "constraint"],
+            # Common mappings
             "customerorder": ["customer_order", "custord"],
             "customer_order": ["customerorder", "custord"],
             "purchaseorder": ["purchase_order", "purord"],
             "purchase_order": ["purchaseorder", "purord"],
+        }
+
+        # Add GUI mappings if available
+        if hasattr(self, "_gui_mappings") and self._gui_mappings:
+            # Add GUI-to-entity mappings
+            for gui_label, entities in self._gui_mappings.get(
+                "gui_to_entity", {}
+            ).items():
+                # Add GUI label as synonym for all its entities
+                for entity in entities:
+                    entity_lower = entity.lower()
+                    if entity_lower not in entity_synonyms:
+                        entity_synonyms[entity_lower] = []
+                    entity_synonyms[entity_lower].extend(
+                        [gui_label] + [e.lower() for e in entities if e != entity]
+                    )
+
+            # Add entity synonym mappings from GUI data
+            for entity_key, synonyms in self._gui_mappings.get(
+                "entity_synonyms", {}
+            ).items():
+                entity_synonyms[entity_key] = list(
+                    set(
+                        entity_synonyms.get(entity_key, [])
+                        + [s.lower() for s in synonyms]
+                    )
+                )
+
+        # Action-to-entity mappings for compound patterns (including GUI mappings)
+        action_entity_patterns = {
+            # "entity action" -> prioritize EntityAction or Entity files
+            ("project", "transaction"): ["ProjectTransaction", "ProjectTrans"],
+            ("project", "posting"): ["ProjectTransPosting", "ProjectPosting"],
+            ("employee", "validation"): [
+                "CompanyPerson",
+                "Employee",
+            ],  # GUI: "Employee File" -> CompanyPerson.plsql
+            ("employee", "name"): ["CompanyPerson", "Employee"],
+            ("activity", "creation"): ["Activity", "ActivityCreation"],
+            ("expense", "lines"): ["ExpenseDetail", "ExpenseLine"],
+            ("expense", "detail"): ["ExpenseDetail", "ExpenseHeader"],
+            ("payment", "authorization"): ["PaymentAddress", "Payment"],
+            ("item", "creation"): ["PartCatalog", "ItemCatalog"],
+            ("item", "stocking"): ["InventoryPart", "InventoryItem"],
+            ("item", "purchase"): ["PurchasePart", "PurchaseItem"],
         }
 
         # Remove common stop words
@@ -494,6 +606,8 @@ class IFSCloudTantivyIndexer:
             "may",
             "might",
             "must",
+            "per",
+            "global",
         }
 
         # Split on whitespace and common punctuation
@@ -508,11 +622,40 @@ class IFSCloudTantivyIndexer:
             and term.strip() not in stop_words
         ]
 
-        # Add synonyms for entity names
+        # Add synonyms for entity names from static mappings
         expanded_terms = list(significant_terms)  # Start with original terms
         for term in significant_terms:
             if term in entity_synonyms:
                 expanded_terms.extend(entity_synonyms[term])
+
+        # Add GUI navigation mappings (loaded from generated data)
+        for term in significant_terms:
+            if term in self._gui_mappings:
+                mapping = self._gui_mappings[term]
+                entity_name = mapping.get("entity_name", "")
+                if entity_name:
+                    expanded_terms.append(entity_name.lower())
+                    # Add camelCase to words conversion
+                    expanded_terms.append(self._camel_to_words(entity_name).lower())
+
+                # Add additional synonyms from GUI mapping
+                gui_synonyms = mapping.get("synonyms", [])
+                expanded_terms.extend(gui_synonyms)
+
+        # Add compound entity names based on action patterns
+        query_terms = [
+            t for t in significant_terms if len(t) >= 3
+        ]  # Focus on meaningful terms
+        for i in range(len(query_terms) - 1):
+            term_pair = (query_terms[i], query_terms[i + 1])
+            if term_pair in action_entity_patterns:
+                expanded_terms.extend(action_entity_patterns[term_pair])
+
+        # Also check reverse order patterns
+        for i in range(len(query_terms) - 1):
+            term_pair = (query_terms[i + 1], query_terms[i])  # Reversed
+            if term_pair in action_entity_patterns:
+                expanded_terms.extend(action_entity_patterns[term_pair])
 
         # Remove duplicates while preserving order
         unique_terms = []
@@ -527,6 +670,197 @@ class IFSCloudTantivyIndexer:
             unique_terms.insert(0, query.strip())
 
         return unique_terms
+
+    def _camel_to_words(self, camel_str: str) -> str:
+        """Convert CamelCase to space-separated words.
+
+        Args:
+            camel_str: CamelCase string
+
+        Returns:
+            Space-separated words
+        """
+        import re
+
+        return re.sub(r"(?<!^)(?=[A-Z])", " ", camel_str)
+
+    def _check_compound_entity_match(
+        self, filename: str, query_terms: List[str], original_query: str
+    ) -> float:
+        """Check for compound entity name matches based on action patterns.
+
+        Args:
+            filename: The filename to check against
+            query_terms: Parsed query terms
+            original_query: Original search query
+
+        Returns:
+            Bonus score for compound entity matches (0 if no match)
+        """
+        filename_lower = filename.lower()
+        filename_base = (
+            filename_lower.rsplit(".", 1)[0]
+            if "." in filename_lower
+            else filename_lower
+        )
+
+        # High-priority compound patterns with their expected filename matches
+        compound_patterns = {
+            # Project domain
+            ("project", "transaction"): ["projecttransaction"],
+            ("project", "posting"): ["projecttransposting", "projectposting"],
+            ("transaction", "project"): ["projecttransaction"],
+            ("posting", "project"): ["projecttransposting", "projectposting"],
+            # Employee domain (GUI mappings included)
+            ("employee", "validation"): [
+                "companyperson",
+                "employee",
+            ],  # "Employee File" -> CompanyPerson.plsql
+            ("employee", "name"): ["companyperson", "employee"],
+            ("validation", "employee"): ["companyperson", "employee"],
+            ("name", "employee"): ["companyperson", "employee"],
+            ("name", "validation"): [
+                "companyperson",
+                "employee",
+            ],  # "name validation" should find CompanyPerson.plsql
+            # Activity domain
+            ("activity", "creation"): ["activity", "activitycreation"],
+            ("creation", "activity"): ["activity", "activitycreation"],
+            # Expense domain - lines/details
+            ("expense", "lines"): ["expensedetail", "expenseline"],
+            ("expense", "detail"): ["expensedetail", "expenseheader"],
+            ("lines", "expense"): ["expensedetail", "expenseline"],
+            ("detail", "expense"): ["expensedetail", "expenseheader"],
+            ("sheet", "lines"): ["expensedetail"],
+            # Payment domain
+            ("payment", "authorization"): ["paymentaddress", "payment"],
+            ("payment", "modification"): ["paymentaddress", "payment"],
+            ("authorization", "payment"): ["paymentaddress", "payment"],
+            ("modification", "payment"): ["paymentaddress", "payment"],
+            # Item/Part domain
+            ("item", "creation"): ["partcatalog", "itemcatalog"],
+            ("item", "stocking"): ["inventorypart", "inventoryitem"],
+            ("item", "purchase"): ["purchasepart", "purchaseitem"],
+            ("part", "creation"): ["partcatalog"],
+            ("part", "stocking"): ["inventorypart"],
+            ("part", "purchase"): ["purchasepart"],
+            ("stocking", "item"): ["inventorypart", "inventoryitem"],
+            ("purchase", "item"): ["purchasepart", "purchaseitem"],
+            ("creation", "item"): ["partcatalog", "itemcatalog"],
+        }
+
+        # Check for compound matches
+        max_bonus = 0.0
+        query_terms_clean = [
+            t for t in query_terms if len(t) >= 3
+        ]  # Focus on meaningful terms
+
+        for i in range(len(query_terms_clean) - 1):
+            # Check adjacent term pairs
+            term_pair = (query_terms_clean[i], query_terms_clean[i + 1])
+
+            if term_pair in compound_patterns:
+                expected_filenames = compound_patterns[term_pair]
+
+                for expected in expected_filenames:
+                    if expected in filename_base:
+                        # Strong bonus for compound entity match - higher for exact matches
+                        if filename_base == expected:
+                            max_bonus = max(max_bonus, 90.0)  # Near-exact match
+                        elif filename_base.startswith(expected):
+                            max_bonus = max(max_bonus, 75.0)  # Prefix match
+                        elif expected in filename_base:
+                            max_bonus = max(max_bonus, 60.0)  # Contains match
+
+        # Also check reverse patterns (e.g., "posting project")
+        for i in range(len(query_terms_clean) - 1):
+            term_pair = (query_terms_clean[i + 1], query_terms_clean[i])  # Reversed
+
+            if term_pair in compound_patterns:
+                expected_filenames = compound_patterns[term_pair]
+
+                for expected in expected_filenames:
+                    if expected in filename_base:
+                        # Slightly lower bonus for reversed patterns
+                        if filename_base == expected:
+                            max_bonus = max(max_bonus, 85.0)
+                        elif filename_base.startswith(expected):
+                            max_bonus = max(max_bonus, 70.0)
+                        elif expected in filename_base:
+                            max_bonus = max(max_bonus, 55.0)
+
+        return max_bonus
+
+    def _check_simple_entity_priority(
+        self, filename: str, query: str, query_terms: List[str]
+    ) -> float:
+        """Check for simple entity name priority boosts for property/validation queries.
+
+        Args:
+            filename: The filename to check
+            query: Original search query
+            query_terms: Parsed query terms
+
+        Returns:
+            Bonus score for simple entity name matches (0 if no match)
+        """
+        filename_lower = filename.lower()
+        filename_base = (
+            filename_lower.rsplit(".", 1)[0]
+            if "." in filename_lower
+            else filename_lower
+        )
+        query_lower = query.lower()
+
+        # Property/validation query patterns that should prioritize simple entity names
+        property_patterns = [
+            "name",
+            "validation",
+            "validate",
+            "property",
+            "attribute",
+            "field",
+        ]
+        is_property_query = any(pattern in query_lower for pattern in property_patterns)
+
+        if not is_property_query:
+            return 0.0
+
+        # Entity name mappings for property queries (including GUI mappings)
+        entity_mappings = {
+            "employee": [
+                "companyperson",
+                "employee",
+            ],  # GUI: "Employee File" -> CompanyPerson.plsql
+            "activity": ["activity"],
+            "project": ["project"],
+            "customer": ["customer"],
+            "item": ["partcatalog", "part"],
+            "part": ["partcatalog", "part"],
+        }
+
+        bonus = 0.0
+
+        # Check if any query terms match entity patterns and filename matches expected entity files
+        for term in query_terms:
+            if term in entity_mappings:
+                expected_names = entity_mappings[term]
+
+                for expected in expected_names:
+                    if expected in filename_base:
+                        # Boost simple entity names for property/validation queries
+                        if filename_base == expected:
+                            bonus = max(
+                                bonus, 85.0
+                            )  # Strong boost for exact entity match
+                        elif filename_base.startswith(expected):
+                            bonus = max(bonus, 70.0)  # Good boost for prefix match
+                        elif expected in filename_base:
+                            bonus = max(
+                                bonus, 55.0
+                            )  # Moderate boost for contains match
+
+        return bonus
 
     def _calculate_term_matches(
         self, filename: str, entity_name: str, query_terms: List[str]
@@ -771,6 +1105,77 @@ class IFSCloudTantivyIndexer:
             bonus += min(
                 business_logic_count * 2.0, 15.0
             )  # Up to 15 points for business logic
+
+        # Validation query pattern detection
+        validation_keywords = ["validation", "validate", "verify", "check", "name"]
+        is_validation_query = any(
+            keyword in query_lower for keyword in validation_keywords
+        )
+
+        if is_validation_query:
+            validation_methods = [
+                "validate",
+                "verify",
+                "check",
+                "error",
+                "exception",
+                "constraint",
+            ]
+            validation_count = sum(
+                1
+                for method in validation_methods
+                if method in functions_lower or method in content_lower
+            )
+
+            if validation_count > 0:
+                bonus += min(
+                    validation_count * 5.0, 25.0
+                )  # Up to 25 points for validation
+
+                # Extra bonus for main entity files doing validation
+                if file_type.endswith(".plsql") and line_count > 1000:
+                    bonus += (
+                        15.0  # Large plsql files likely contain main validation logic
+                    )
+
+        # Rules and creation pattern detection
+        rules_keywords = [
+            "rules",
+            "creation",
+            "stocking",
+            "purchase",
+            "global",
+            "company",
+        ]
+        is_rules_query = any(keyword in query_lower for keyword in rules_keywords)
+
+        if is_rules_query:
+            rules_methods = [
+                "rule",
+                "create",
+                "new",
+                "add",
+                "insert",
+                "policy",
+                "constraint",
+            ]
+            rules_count = sum(
+                1
+                for method in rules_methods
+                if method in functions_lower or method in content_lower
+            )
+
+            if rules_count > 0:
+                bonus += min(
+                    rules_count * 4.0, 20.0
+                )  # Up to 20 points for rules/creation logic
+
+                # Boost catalog/master files for global rules
+                name_field = doc.get_first("name") or ""
+                if (
+                    "global" in query_lower or "catalog" in query_lower
+                ) and "catalog" in name_field.lower():
+                    bonus += 20.0
 
         return bonus
 
@@ -2019,8 +2424,22 @@ class IFSCloudTantivyIndexer:
                     == query_lower  # Direct filename match without extension
                 )
 
+                # Enhanced compound entity name matching for action patterns
+                compound_entity_match = self._check_compound_entity_match(
+                    filename, query_terms, query
+                )
+
+                # Simple entity name prioritization for validation/property queries
+                simple_entity_boost = self._check_simple_entity_priority(
+                    filename, query, query_terms
+                )
+
                 if exact_filename_match:
-                    match_bonus += 100.0  # MASSIVE bonus for exact filename match (doubled from 50)
+                    match_bonus += 100.0  # MASSIVE bonus for exact filename match
+                elif compound_entity_match > 0:
+                    match_bonus += compound_entity_match  # Strong bonus for compound entity matches
+                elif simple_entity_boost > 0:
+                    match_bonus += simple_entity_boost  # Boost simple entity names for certain query patterns
                 elif term_matches["all_terms_in_filename"]:
                     # All query terms found in filename (e.g., "Scope" and "Schedule" in "ScopeAndSchedule")
                     match_bonus += (
