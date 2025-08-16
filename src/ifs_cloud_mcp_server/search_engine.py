@@ -19,6 +19,8 @@ from .enhanced_search import (
     SearchResult as EnhancedSearchResult,
 )
 from .metadata_extractor import MetadataManager
+from .intent_classifier import IntentClassifier, QueryIntent
+from .metadata_indexer import MetadataIndexer
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,79 @@ class IFSCloudSearchEngine:
         self.metadata_manager = MetadataManager(metadata_dir)
         self.enhanced_search_engine: Optional[MetadataEnhancedSearchEngine] = None
         self.current_ifs_version: Optional[str] = None
+
+        # Initialize ML-based intent classifier
+        try:
+            self.intent_classifier = IntentClassifier()
+            logger.info("Intent classifier initialized successfully")
+        except Exception as e:
+            logger.warning(f"Intent classifier initialization failed: {e}")
+            self.intent_classifier = None
+
+        # Initialize dedicated metadata indexer
+        try:
+            metadata_index_path = Path(indexer.index_path) / "metadata_index"
+            self.metadata_indexer = MetadataIndexer(metadata_index_path)
+
+            # Try to build from available metadata export if index is empty
+            self._initialize_metadata_index()
+
+            logger.info("Metadata indexer initialized successfully")
+        except Exception as e:
+            logger.warning(f"Metadata indexer initialization failed: {e}")
+            self.metadata_indexer = None
+
+    def _initialize_metadata_index(self):
+        """Initialize metadata index from available database exports."""
+        if not self.metadata_indexer:
+            return
+
+        try:
+            # Check if index is already populated
+            stats = self.metadata_indexer.get_stats()
+            if stats.get("total_documents", 0) > 0:
+                logger.info(
+                    f"Metadata index already contains {stats['total_documents']} documents"
+                )
+                return
+
+            # Look for metadata export files
+            from .config import get_data_directory
+
+            data_dir = get_data_directory()
+            metadata_dir = data_dir / "metadata"
+
+            if not metadata_dir.exists():
+                logger.info(
+                    "No metadata directory found - metadata indexer will remain empty"
+                )
+                return
+
+            # Find the most recent metadata export
+            metadata_export_file = None
+            for version_dir in metadata_dir.iterdir():
+                if version_dir.is_dir():
+                    export_file = version_dir / "metadata_extract.json"
+                    if export_file.exists():
+                        metadata_export_file = export_file
+                        logger.info(f"Found metadata export: {export_file}")
+                        break
+
+            if metadata_export_file:
+                # Build metadata index from the export
+                count = self.metadata_indexer.build_from_metadata_export(
+                    metadata_export_file
+                )
+                logger.info(
+                    f"Built metadata index with {count} documents from database export"
+                )
+            else:
+                logger.info(
+                    "No metadata export found - run 'extract' command first to populate metadata index"
+                )
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize metadata index: {e}")
 
     def set_ifs_version(self, version: str) -> bool:
         """
@@ -128,6 +203,57 @@ class IFSCloudSearchEngine:
                 min_complexity=min_complexity,
                 max_complexity=max_complexity,
             )
+
+            # 2. Get metadata-enhanced results if metadata indexer is available
+            metadata_results = []
+            if self.metadata_indexer:
+                try:
+                    metadata_search_results = self.metadata_indexer.search_metadata(
+                        query=query,
+                        limit=limit * 2,
+                        file_types=[file_type] if file_type else None,
+                        modules=[module] if module else None,
+                    )
+
+                    # Convert metadata results to SearchResult objects
+                    for meta_result in metadata_search_results:
+                        if meta_result.get("path") not in seen_paths:
+                            # Create a SearchResult from metadata
+                            search_result = SearchResult(
+                                path=meta_result["path"],
+                                name=Path(meta_result["path"]).name,
+                                content_preview="",  # Not needed for metadata search
+                                score=meta_result.get("score", 1.0)
+                                * 0.8,  # Slight penalty for metadata-only
+                                type=meta_result.get("file_type", ""),
+                                module=meta_result.get("module"),
+                                logical_unit=meta_result.get("logical_unit"),
+                                line_count=meta_result.get("line_count"),
+                                size_kb=meta_result.get("size_kb"),
+                                complexity_score=meta_result.get("complexity_score"),
+                                highlight="",
+                                entities=meta_result.get("entities"),
+                                functions=meta_result.get("functions"),
+                                pages=meta_result.get("pages"),
+                                lists=meta_result.get("lists"),
+                                groups=meta_result.get("groups"),
+                                trees=meta_result.get("trees"),
+                                navigators=meta_result.get("navigators"),
+                                dependencies=meta_result.get("dependencies"),
+                            )
+                            metadata_results.append(search_result)
+                            seen_paths.add(meta_result["path"])
+
+                    logger.info(
+                        f"Metadata indexer returned {len(metadata_results)} additional results"
+                    )
+
+                except Exception as e:
+                    logger.warning(f"Metadata search failed: {e}")
+                    metadata_results = []
+
+            # Add metadata results first (they have higher priority)
+            all_results.extend(metadata_results)
 
             # Add index results with proper scoring
             for result in index_results:
@@ -600,79 +726,282 @@ ORDER BY module, lu_name, view_name
     def _apply_business_ranking(
         self, results: List["SearchResult"], query: str
     ) -> List["SearchResult"]:
-        """Apply business logic ranking to search results."""
+        """Apply sophisticated business logic ranking with ML-based intent classification."""
         query_lower = query.lower()
-        business_terms = [
+
+        # Use ML intent classifier if available
+        if self.intent_classifier:
+            try:
+                intent_prediction = self.intent_classifier.predict(query)
+                intent = intent_prediction.intent
+                confidence = intent_prediction.confidence
+
+                logger.info(
+                    f"Query intent: {intent.value} (confidence: {confidence:.3f})"
+                )
+
+                # Apply intent-specific ranking
+                for result in results:
+                    original_score = result.score
+
+                    if intent == QueryIntent.BUSINESS_LOGIC:
+                        # Business logic queries - heavily favor implementation files
+                        if result.type == ".plsql":
+                            result.score *= 4.5 * confidence
+                        elif result.type == ".client":
+                            result.score *= 3.2 * confidence
+                        elif result.type == ".views":
+                            result.score *= 2.4 * confidence
+                        elif result.type == ".projection":
+                            result.score *= 1.8 * confidence
+                        elif result.type == ".entity":
+                            result.score *= 0.1 * confidence
+
+                    elif intent == QueryIntent.ENTITY_DEFINITION:
+                        # Entity queries - balanced but practical
+                        if result.type == ".plsql":
+                            result.score *= 2.8 * confidence
+                        elif result.type == ".views":
+                            result.score *= 2.2 * confidence
+                        elif result.type == ".entity":
+                            result.score *= 1.8 * confidence
+                        elif result.type == ".client":
+                            result.score *= 1.6 * confidence
+                        elif result.type == ".projection":
+                            result.score *= 1.4 * confidence
+
+                    elif intent == QueryIntent.UI_COMPONENTS:
+                        # UI queries - favor client files
+                        if result.type == ".client":
+                            result.score *= 4.0 * confidence
+                        elif result.type == ".plsql":
+                            result.score *= 2.5 * confidence
+                        elif result.type == ".views":
+                            result.score *= 2.0 * confidence
+                        elif result.type == ".projection":
+                            result.score *= 1.5 * confidence
+                        elif result.type == ".entity":
+                            result.score *= 0.8 * confidence
+
+                    elif intent == QueryIntent.API_INTEGRATION:
+                        # API queries - favor projections
+                        if result.type == ".projection":
+                            result.score *= 4.0 * confidence
+                        elif result.type == ".plsql":
+                            result.score *= 2.8 * confidence
+                        elif result.type == ".views":
+                            result.score *= 2.0 * confidence
+                        elif result.type == ".client":
+                            result.score *= 1.5 * confidence
+                        elif result.type == ".entity":
+                            result.score *= 1.0 * confidence
+
+                    elif intent == QueryIntent.DATA_ACCESS:
+                        # Data access queries - favor views and reports
+                        if result.type == ".views":
+                            result.score *= 4.0 * confidence
+                        elif result.type == ".plsql":
+                            result.score *= 2.5 * confidence
+                        elif result.type == ".entity":
+                            result.score *= 2.0 * confidence
+                        elif result.type == ".projection":
+                            result.score *= 1.8 * confidence
+                        elif result.type == ".client":
+                            result.score *= 1.5 * confidence
+
+                    else:  # GENERAL, TROUBLESHOOTING
+                        # Default balanced approach with practical bias
+                        if result.type == ".plsql":
+                            result.score *= 3.5
+                        elif result.type == ".client":
+                            result.score *= 2.5
+                        elif result.type == ".views":
+                            result.score *= 2.0
+                        elif result.type == ".projection":
+                            result.score *= 1.6
+                        elif result.type == ".entity":
+                            result.score *= 0.6
+
+                return results
+
+            except Exception as e:
+                logger.error(f"Intent classification failed: {e}")
+                # Fall back to keyword-based classification
+
+        # Fallback keyword-based classification (original logic)
+        business_logic_terms = [
             "authorization",
             "approval",
             "workflow",
             "validation",
             "business",
             "rule",
+            "calculation",
+            "process",
+            "procedure",
+            "logic",
+            "check",
+            "verify",
+            "confirm",
+            "execute",
+            "run",
+            "perform",
+            "handle",
+            "management",
+            "control",
+            "monitor",
+            "track",
         ]
-        entity_terms = [
-            "employee",
-            "customer",
-            "order",
-            "activity",
-            "person",
-            "company",
+
+        strong_business_terms = [
+            "authorization",
+            "validation",
+            "calculation",
+            "approval",
+            "workflow",
+            "process",
+            "procedure",
+            "check",
+            "verify",
+            "control",
         ]
+
+        entity_focused_terms = [
+            "definition",
+            "structure",
+            "schema",
+            "model",
+            "attribute",
+            "property",
+            "field",
+            "column",
+            "table",
+        ]
+
+        has_business_logic = any(term in query_lower for term in business_logic_terms)
+        has_strong_business = any(term in query_lower for term in strong_business_terms)
+        is_entity_focused = any(term in query_lower for term in entity_focused_terms)
+
+        entity_exact_match = False
+        for result in results:
+            if (
+                result.type == ".entity"
+                and result.name.lower().replace(".entity", "") in query_lower
+            ):
+                entity_exact_match = True
+                break
 
         for result in results:
             original_score = result.score
 
-            # For entity-like searches, prioritize files that contain business logic
-            if any(term in query_lower for term in entity_terms):
+            # Apply different ranking strategies based on query intent
+            if has_strong_business and not is_entity_focused:
+                # Strong business logic queries - heavily favor implementation files
                 if result.type == ".plsql":
-                    result.score *= 2.5  # Strong boost for business logic files
-                elif result.type == ".views":
-                    result.score *= 1.8  # Database views often contain useful logic
-                elif result.type == ".projection":
-                    result.score *= 1.6  # API projections show the interface
+                    result.score *= 4.0  # Very strong boost for PL/SQL
                 elif result.type == ".client":
-                    result.score *= 1.4  # UI definitions show user interaction
-                elif result.type == ".entity":
-                    result.score *= 0.8  # Reduce entity priority for practical searches
-
-            # Business logic boosting for certain queries
-            if any(term in query_lower for term in business_terms):
-                if result.type == ".plsql":
-                    result.score *= 3.0  # Very strong boost for business logic files
-                elif result.type == ".entity":
-                    result.score *= (
-                        0.5  # Significantly reduce entity ranking for business queries
-                    )
-
-            # File type priority boosting for exact name matches
-            if query_lower in result.name.lower():
-                filename_match_boost = 1.5
-                if result.type == ".plsql":
-                    result.score *= (
-                        filename_match_boost * 1.2
-                    )  # Extra boost for API files
+                    result.score *= 3.0  # Strong boost for client-side logic
                 elif result.type == ".views":
-                    result.score *= filename_match_boost
+                    result.score *= 2.2  # Good boost for views
                 elif result.type == ".projection":
-                    result.score *= filename_match_boost
+                    result.score *= 1.8  # Moderate boost for projections
+                elif result.type == ".entity":
+                    result.score *= 0.15  # Very heavy penalty for entities
+
+            elif has_business_logic and not is_entity_focused:
+                # General business queries - moderate favor to implementation
+                if result.type == ".plsql":
+                    result.score *= 3.5  # Strong boost for PL/SQL
+                elif result.type == ".client":
+                    result.score *= 2.5  # Good boost for client-side
+                elif result.type == ".views":
+                    result.score *= 2.0  # Good boost for views
+                elif result.type == ".projection":
+                    result.score *= 1.6  # Moderate boost for projections
+                elif result.type == ".entity":
+                    result.score *= 0.25  # Heavy penalty for entities
+
+            elif is_entity_focused or entity_exact_match:
+                # Entity-focused queries - balanced but still favor practical files
+                if result.type == ".plsql":
+                    result.score *= 2.5  # Good boost for PL/SQL
+                elif result.type == ".views":
+                    result.score *= 2.0  # Good boost for views
+                elif result.type == ".entity":
+                    result.score *= 1.5  # Moderate boost for entities (only when explicitly requested)
+                elif result.type == ".client":
+                    result.score *= 1.8  # Boost for client files
+                elif result.type == ".projection":
+                    result.score *= 1.6  # Boost for projections
+
+            else:
+                # General/unknown queries - balanced approach favoring practical files
+                if result.type == ".plsql":
+                    result.score *= 3.2  # Strong boost for PL/SQL (most practical)
+                elif result.type == ".client":
+                    result.score *= 2.2  # Good boost for UI logic
+                elif result.type == ".views":
+                    result.score *= 1.8  # Good boost for views
+                elif result.type == ".projection":
+                    result.score *= 1.6  # Moderate boost for projections
+                elif result.type == ".entity":
+                    result.score *= 0.4  # Significant penalty for entities
+
+            # Boost for exact filename matches, but balanced by file type
+            result_name_lower = result.name.lower()
+            if any(word in result_name_lower for word in query_lower.split()):
+                filename_match_boost = 1.4
+                if result.type == ".plsql":
+                    result.score *= (
+                        filename_match_boost * 1.5
+                    )  # Extra boost for practical files
+                elif result.type == ".client":
+                    result.score *= filename_match_boost * 1.4
+                elif result.type == ".views":
+                    result.score *= filename_match_boost * 1.3
+                elif result.type == ".projection":
+                    result.score *= filename_match_boost * 1.2
                 elif result.type == ".entity":
                     result.score *= (
-                        filename_match_boost * 0.9
-                    )  # Slightly less for entities
+                        filename_match_boost * 0.6
+                    )  # Reduced boost for entities
 
-            # Module relevance boosting for core business modules
-            if result.module and result.module.upper() in [
-                "PERSON",
-                "ORDER",
-                "ACCRUL",
-                "INVENT",
+            # Module relevance - boost core business modules
+            if result.module and result.module.lower() in [
+                "person",
+                "order",
+                "accrul",
+                "invent",
+                "invoic",
+                "purch",
+                "trvexp",
+                "proj",
+                "mfgstd",
+                "fndadm",
+                "fndbas",
             ]:
-                result.score *= 1.15
+                result.score *= 1.2
 
-            # File size/complexity boosting - larger files often have more business logic
-            if result.type == ".plsql" and result.line_count > 100:
-                complexity_boost = min(1.5, 1.0 + (result.line_count / 1000))
-                result.score *= complexity_boost
+            # Complexity boosting - larger implementation files often more valuable
+            if (
+                result.type in [".plsql", ".client"]
+                and hasattr(result, "line_count")
+                and result.line_count
+            ):
+                if result.line_count > 100:
+                    complexity_boost = min(1.4, 1.0 + (result.line_count / 2000))
+                    result.score *= complexity_boost
+
+            # Anti-dominance mechanism - reduce scores for overrepresented types
+            type_counts = {}
+            for r in results:
+                type_counts[r.type] = type_counts.get(r.type, 0) + 1
+
+            total_results = len(results)
+            if total_results > 10:
+                type_ratio = type_counts.get(result.type, 0) / total_results
+                if type_ratio > 0.7:  # If one type dominates >70% of results
+                    result.score *= 0.8  # Apply penalty to encourage diversity
 
         return results
 
