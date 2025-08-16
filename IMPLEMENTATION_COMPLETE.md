@@ -30,7 +30,7 @@ I've successfully implemented a comprehensive **metadata-enhanced search system*
 
 ### ✅ 4. **Extraction Utilities**
 
-- **`extract_metadata.py`**: Command-line tools for metadata extraction
+- **Integrated `extract` command**: Database metadata extraction via main MCP server CLI
 - **MCP Integration**: Works with MCP SQLcl server for database queries
 - **Multiple Formats**: Supports CSV and JSON result processing
 - **Step-by-Step Instructions**: Guides users through extraction process

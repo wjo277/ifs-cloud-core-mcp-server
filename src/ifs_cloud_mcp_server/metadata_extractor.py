@@ -93,6 +93,35 @@ class ViewInfo:
 
 
 @dataclass
+class NavigatorEntry:
+    """Navigator entry linking GUI to backend entities"""
+
+    label: str
+    projection: str
+    entity_name: str
+    page_type: Optional[str] = None
+    entry_type: Optional[str] = None
+    sort_order: Optional[int] = None
+
+    def to_search_terms(self) -> List[str]:
+        """Extract searchable terms from navigator entry"""
+        terms = []
+
+        # Add GUI label terms
+        terms.extend(self.label.lower().split())
+
+        # Add backend entity terms
+        terms.append(self.entity_name.lower())
+        terms.append(self.projection.lower())
+
+        # Add type information
+        if self.page_type:
+            terms.append(self.page_type.lower())
+
+        return list(set(terms))  # Remove duplicates
+
+
+@dataclass
 class MetadataExtract:
     """Container for all extracted metadata"""
 
@@ -102,6 +131,7 @@ class MetadataExtract:
     modules: List[ModuleInfo]
     domain_mappings: List[DomainMapping]
     views: List[ViewInfo]
+    navigator_entries: List[NavigatorEntry]
     checksum: str
 
     def save_to_file(self, filepath: Path) -> None:
@@ -116,11 +146,13 @@ class MetadataExtract:
             "modules": [asdict(mod) for mod in self.modules],
             "domain_mappings": [asdict(dm) for dm in self.domain_mappings],
             "views": [asdict(view) for view in self.views],
+            "navigator_entries": [asdict(nav) for nav in self.navigator_entries],
             "stats": {
                 "logical_units_count": len(self.logical_units),
                 "modules_count": len(self.modules),
                 "domain_mappings_count": len(self.domain_mappings),
                 "views_count": len(self.views),
+                "navigator_entries_count": len(self.navigator_entries),
             },
         }
 
@@ -143,6 +175,9 @@ class MetadataExtract:
             modules=[ModuleInfo(**mod) for mod in data["modules"]],
             domain_mappings=[DomainMapping(**dm) for dm in data["domain_mappings"]],
             views=[ViewInfo(**view) for view in data["views"]],
+            navigator_entries=[
+                NavigatorEntry(**nav) for nav in data.get("navigator_entries", [])
+            ],
         )
 
 
@@ -190,6 +225,27 @@ class DatabaseMetadataExtractor:
                   AND ROWNUM <= 5000  -- Limit for performance
                 ORDER BY lu_name, view_name
             """,
+            "navigator_entries": """
+                SELECT nav.label, 
+                       nav.projection,
+                       pes.entity_name,
+                       nav.page_type,
+                       nav.entry_type,
+                       nav.sort_order
+                FROM fnd_navigator_all nav
+                JOIN md_projection_entityset pes ON nav.projection = pes.projection_name
+                WHERE nav.label IS NOT NULL
+                  AND nav.entry_type IN ('PAGE', 'LIST')
+                  AND nav.label NOT LIKE '%NavEntry%'
+                  AND nav.label NOT LIKE '%Analysis%'
+                  AND LENGTH(nav.label) BETWEEN 5 AND 50
+                  AND pes.entity_name NOT LIKE '%Virtual%'
+                  AND pes.entity_name NOT LIKE '%Lov%'
+                  AND pes.entity_name NOT LIKE '%Query%'
+                  AND pes.entity_name NOT LIKE '%Lookup%'
+                  AND ROWNUM <= 5000  -- Limit for performance
+                ORDER BY nav.label, pes.entity_name
+            """,
         }
 
     def extract_from_database(self, ifs_version: str) -> MetadataExtract:
@@ -223,10 +279,14 @@ class DatabaseMetadataExtractor:
         views = self._extract_views()
         logger.info(f"Extracted {len(views)} views")
 
+        # Extract navigator entries
+        navigator_entries = self._extract_navigator_entries()
+        logger.info(f"Extracted {len(navigator_entries)} navigator entries")
+
         # Create extract
         extract_date = datetime.now()
         checksum = self._calculate_checksum(
-            logical_units, modules, domain_mappings, views
+            logical_units, modules, domain_mappings, views, navigator_entries
         )
 
         return MetadataExtract(
@@ -236,6 +296,7 @@ class DatabaseMetadataExtractor:
             modules=modules,
             domain_mappings=domain_mappings,
             views=views,
+            navigator_entries=navigator_entries,
             checksum=checksum,
         )
 
@@ -323,78 +384,108 @@ class DatabaseMetadataExtractor:
 
     def _extract_logical_units(self) -> List[LogicalUnit]:
         """Extract logical units from database"""
-        cursor = self.db_connection.cursor()
-        cursor.execute(self.extraction_queries["logical_units"])
+        from sqlalchemy import text
 
-        logical_units = []
-        for row in cursor.fetchall():
-            logical_units.append(
-                LogicalUnit(
-                    module=row[0] or "",
-                    lu_name=row[1] or "",
-                    lu_prompt=row[2],
-                    base_table=row[3],
-                    base_view=row[4],
-                    logical_unit_type=row[5],
-                    custom_fields=row[6],
+        with self.db_connection.connect() as conn:
+            result = conn.execute(text(self.extraction_queries["logical_units"]))
+
+            logical_units = []
+            for row in result:
+                logical_units.append(
+                    LogicalUnit(
+                        module=row[0] or "",
+                        lu_name=row[1] or "",
+                        lu_prompt=row[2],
+                        base_table=row[3],
+                        base_view=row[4],
+                        logical_unit_type=row[5],
+                        custom_fields=row[6],
+                    )
                 )
-            )
 
-        return logical_units
+            return logical_units
 
     def _extract_modules(self) -> List[ModuleInfo]:
         """Extract module information from database"""
-        cursor = self.db_connection.cursor()
-        cursor.execute(self.extraction_queries["modules"])
+        from sqlalchemy import text
 
-        modules = []
-        for row in cursor.fetchall():
-            modules.append(
-                ModuleInfo(
-                    name=row[0] or "",
-                    lu_count=int(row[1] or 0),
-                    description=f"{row[1]} logical units, {row[2]} tables",
+        with self.db_connection.connect() as conn:
+            result = conn.execute(text(self.extraction_queries["modules"]))
+
+            modules = []
+            for row in result:
+                modules.append(
+                    ModuleInfo(
+                        name=row[0] or "",
+                        lu_count=int(row[1] or 0),
+                        description=f"{row[1]} logical units, {row[2]} tables",
+                    )
                 )
-            )
 
-        return modules
+            return modules
 
     def _extract_domain_mappings(self) -> List[DomainMapping]:
         """Extract domain mappings from database"""
-        cursor = self.db_connection.cursor()
-        cursor.execute(self.extraction_queries["domain_mappings"])
+        from sqlalchemy import text
 
-        mappings = []
-        for row in cursor.fetchall():
-            mappings.append(
-                DomainMapping(
-                    lu_name=row[0] or "",
-                    package_name=row[1] or "",
-                    db_value=row[2] or "",
-                    client_value=row[3] or "",
+        with self.db_connection.connect() as conn:
+            result = conn.execute(text(self.extraction_queries["domain_mappings"]))
+
+            mappings = []
+            for row in result:
+                mappings.append(
+                    DomainMapping(
+                        lu_name=row[0] or "",
+                        package_name=row[1] or "",
+                        db_value=row[2] or "",
+                        client_value=row[3] or "",
+                    )
                 )
-            )
 
-        return mappings
+            return mappings
 
     def _extract_views(self) -> List[ViewInfo]:
         """Extract view information from database"""
-        cursor = self.db_connection.cursor()
-        cursor.execute(self.extraction_queries["views"])
+        from sqlalchemy import text
 
-        views = []
-        for row in cursor.fetchall():
-            views.append(
-                ViewInfo(
-                    lu_name=row[0] or "",
-                    view_name=row[1] or "",
-                    view_type=row[2] or "",
-                    view_prompt=row[3],
-                    view_comment=row[4],
+        with self.db_connection.connect() as conn:
+            result = conn.execute(text(self.extraction_queries["views"]))
+
+            views = []
+            for row in result:
+                views.append(
+                    ViewInfo(
+                        lu_name=row[0] or "",
+                        view_name=row[1] or "",
+                        view_type=row[2] or "",
+                        view_prompt=row[3],
+                        view_comment=row[4],
+                    )
                 )
-            )
 
-        return views
+            return views
+
+    def _extract_navigator_entries(self) -> List[NavigatorEntry]:
+        """Extract navigator entries from database"""
+        from sqlalchemy import text
+
+        with self.db_connection.connect() as conn:
+            result = conn.execute(text(self.extraction_queries["navigator_entries"]))
+
+            navigator_entries = []
+            for row in result:
+                navigator_entries.append(
+                    NavigatorEntry(
+                        label=row[0] or "",
+                        projection=row[1] or "",
+                        entity_name=row[2] or "",
+                        page_type=row[3],
+                        entry_type=row[4],
+                        sort_order=int(row[5]) if row[5] is not None else None,
+                    )
+                )
+
+            return navigator_entries
 
     def _calculate_checksum(
         self,
@@ -402,11 +493,11 @@ class DatabaseMetadataExtractor:
         modules: List[ModuleInfo],
         domain_mappings: List[DomainMapping],
         views: List[ViewInfo],
+        navigator_entries: List[NavigatorEntry] = None,
     ) -> str:
         """Calculate checksum for metadata consistency verification"""
-        data_str = (
-            f"{len(logical_units)}-{len(modules)}-{len(domain_mappings)}-{len(views)}"
-        )
+        nav_count = len(navigator_entries) if navigator_entries else 0
+        data_str = f"{len(logical_units)}-{len(modules)}-{len(domain_mappings)}-{len(views)}-{nav_count}"
         if logical_units:
             data_str += f"-{logical_units[0].lu_name}-{logical_units[-1].lu_name}"
 

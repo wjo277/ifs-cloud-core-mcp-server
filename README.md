@@ -1,5 +1,23 @@
 # 🧠 IFS Cloud Intelligent AI Agent
 
+> **Transform your IFS Cloud developme  --connection "oracle://ifsapp:password@host:1521/IFSCDEV" 25.1.0
+```
+
+**📁 Custom ZIP Import** (For specific versions):deeply understands your codebase**
+
+An intelligent Model Context Protocol (MCP) server that makes AI agents truly smart about IFS Cloud development. Features comprehensive code analysis, versioned ZIP catalog management, GUI-aware search with Navigator mappings, database metadata extraction, and intelligent context gathering for perfect architectural consistency.
+
+---
+
+## ✨ **What Makes This Special**
+
+### 🎯 **Intelligent AI Agent**
+
+- **Automatic Context Discovery**: AI proactively searches and analyzes your codebase before implementing
+- **Pattern Recognition**: Discovers existing validation rules, APIs, and architectural patterns
+- **Perfect Integration**: Every implementation matches your existing IFS Cloud conventions
+- **Zero False Positives**: Conservative analysis ensures reliable insights
+
 > **Transform your IFS Cloud development with AI that deeply understands your codebase**
 
 An intelligent Model Context Protocol (MCP) server that makes AI agents truly smart about IFS Cloud development. Features comprehensive code analysis, versioned ZIP catalog management, GUI-aware search, and intelligent context gathering for perfect architectural consistency.
@@ -43,11 +61,47 @@ cd ifs-cloud-core-mcp-server
 uv sync
 ```
 
-### 2. **Import Your IFS Cloud ZIP**
+### 2. **Choose Your Approach**
+
+**🏭 Extract from Your Database** (Recommended - Environment-Specific):
+
+- Get metadata tailored to YOUR specific IFS Cloud environment with Navigator GUI mappings
+- Always current with your actual database schema, customizations, and navigation structure
+- Includes FND_NAVIGATOR_ALL mappings connecting GUI elements to backend projections
+- Perfect for developers who want the most accurate search results and UI understanding
+
+```bash
+# Secure extraction with environment variables
+export IFS_DB_PASSWORD="your_secure_password"
+uv run python -m src.ifs_cloud_mcp_server.main extract \
+  --host your-db-host --username ifsapp --service IFSCDEV 25.1.0
+
+# Or use connection string for quick setup
+uv run python -m src.ifs_cloud_mcp_server.main extract \
+  --connection "oracle://ifsapp:password@host:1521/IFSCDEV" 25.1.0
+```
+
+**📦 Use Production Data** (Ready-to-use):
+
+- Complete system with pre-extracted production metadata
+- Enhanced search with business term matching and metadata enrichment
+- Ready-to-use with real IFS Cloud files
+
+```bash
+cd production
+uv run python test_setup.py  # Verify production setup
+uv run python demos/demo_real_files.py  # See the magic happen!
+```
+
+**� Custom ZIP Import** (For specific versions):
 
 ```bash
 # Import any IFS Cloud ZIP file to create versioned catalog
 uv run python -m src.ifs_cloud_mcp_server.main import "IFS_Cloud_24.2.1.zip" --version "24.2.1"
+```
+
+```
+
 ```
 
 ### 3. **Start Intelligent AI Agent**
@@ -142,11 +196,28 @@ Configure your MCP client to connect to the intelligent AI agent and experience 
 
 ## 📋 **Commands Reference**
 
+### **Database Metadata Extraction**
+
+```bash
+# Extract metadata from your database (recommended)
+export IFS_DB_PASSWORD="secure_password"
+uv run python -m src.ifs_cloud_mcp_server.main extract \
+  --host db-host --username ifsapp --service IFSCDEV 25.1.0
+
+# Extract with connection string
+uv run python -m src.ifs_cloud_mcp_server.main extract \
+  --connection "oracle://user:pass@host:1521/service" 25.1.0
+
+# JSON output for automation
+uv run python -m src.ifs_cloud_mcp_server.main extract \
+  --connection "oracle://..." --quiet --json 25.1.0
+```
+
 ### **ZIP Management**
 
 ```bash
 # Import IFS Cloud ZIP file
-uv run python -m src.ifs_cloud_mcp_server.main import <zip_file> --version <version>
+uv run python -m src.ifs_cloud_mcp_server.main import <zip_file> <version>
 
 # List available versions
 uv run python -m src.ifs_cloud_mcp_server.main list
@@ -155,14 +226,17 @@ uv run python -m src.ifs_cloud_mcp_server.main list
 uv run python -m src.ifs_cloud_mcp_server.main server --version <version>
 ```
 
-### **Quick Helper**
+### **Server Management**
 
 ```bash
-# One command to import and start
-uv run python zip_import_helper.py quick "my_build.zip" "24.2.1"
+# Start MCP server (default - uses ./index)
+uv run python -m src.ifs_cloud_mcp_server.main server
 
-# Import with debug info
-uv run python zip_import_helper.py import "build.zip" --version "latest" --debug
+# Start with specific version
+uv run python -m src.ifs_cloud_mcp_server.main server --version "25.1.0"
+
+# Start with custom index path
+uv run python -m src.ifs_cloud_mcp_server.main server --index-path ./my_index
 ```
 
 ---
@@ -217,19 +291,13 @@ uv run python zip_import_helper.py import "build.zip" --version "latest" --debug
 
 ## 📚 **Documentation**
 
-- **[📖 ZIP Indexing Walkthrough](./ZIP_WALKTHROUGH.md)** - Step-by-step import example
+- **[� Metadata Extraction CLI](./METADATA_EXTRACTION_CLI.md)** - Extract metadata from YOUR database
+- **[�📖 ZIP Indexing Walkthrough](./ZIP_WALKTHROUGH.md)** - Step-by-step import example
 - **[📋 ZIP Indexing Instructions](./ZIP_INDEXING_INSTRUCTIONS.md)** - Complete import documentation
 - **[🧠 Intelligent Agent Guide](./INTELLIGENT_AGENT.md)** - How the AI agent works
 - **[🌐 Web UI Documentation](./WEB_UI_README.md)** - Interactive exploration interface
 
-### 🗺️ **GUI Mapping Maintenance**
-
-- **[🔧 GUI Mapping Extraction Guide](./GUI_MAPPING_EXTRACTION_GUIDE.md)** - Complete documentation for maintaining GUI mappings
-- **[📊 SQL Query Library](./sql/extract_gui_mappings.sql)** - Domain-specific extraction queries
-- **[🔄 Automated Refresh Script](./refresh_gui_mappings.py)** - Automated maintenance tools
-- **[📄 Current GUI Mappings](./data/gui_navigation_mappings.json)** - Live production mappings
-
-> **Note**: GUI mappings are extracted from live IFS Cloud databases to ensure search results match real user navigation patterns. These mappings dramatically improve search accuracy from GUI terms to backend entities.
+> **Note**: All metadata extraction including GUI mappings is now integrated into the main CLI. Use the `extract` command to gather data from your IFS Cloud database.
 
 ---
 

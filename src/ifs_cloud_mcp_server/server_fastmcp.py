@@ -1,4 +1,4 @@
-"""IFS Cloud MCP Server implementation using FastMCP."""
+"""IFS Cloud MCP Server implementation using FastMCP with production database metadata extraction."""
 
 import logging
 from pathlib import Path
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class IFSCloudMCPServer:
-    """MCP Server for IFS Cloud with Tantivy search integration using FastMCP."""
+    """MCP Server for IFS Cloud with Tantivy search integration, production database metadata extraction, and Navigator GUI mappings using FastMCP."""
 
     def __init__(
         self, index_path: Union[str, Path], name: str = "ifs-cloud-mcp-server"
@@ -2442,7 +2442,7 @@ END Handle_{entity_name}_Change___;""",
             response_lines.extend(["", "RECOMMENDED TOOLS:", "-" * 18, ""])
 
             tools = [
-                "Use this MCP server for code generation and analysis",
+                "Use this MCP server for code generation, analysis, and production metadata insights",
                 "IFS Developer Studio for development",
                 "Version control (Git) for code management",
                 "Continuous Integration pipeline",
@@ -3548,21 +3548,31 @@ selector {fragment_name}Selector {{
             **🎯 AI AGENT PRIORITY TOOL - USE THIS FIRST!**
 
             This tool automatically:
-            1. Searches for relevant existing implementations
-            2. Analyzes found files with appropriate analyzers
-            3. Identifies patterns, APIs, and best practices
-            4. Provides comprehensive context for implementation
+            1. Searches for relevant existing implementations in production IFS Cloud metadata
+            2. Analyzes found files with specialized PLSQL, Entity, and Fragment analyzers
+            3. Identifies patterns, APIs, and best practices from real IFS Cloud production code
+            4. Leverages comprehensive database metadata including Navigator GUI mappings
+            5. Provides implementation context using 11,570+ Logical Units and production patterns
+
+            **🗃️ Enhanced with Production Metadata:**
+            - **Navigator Mappings**: GUI-to-backend entity mappings from FND_NAVIGATOR_ALL
+            - **Domain Mappings**: 10,000+ domain value mappings for validation patterns
+            - **Module Structure**: Complete module hierarchy with 152 production modules
+            - **Entity Relationships**: Real production entity dependencies and associations
+            - **View Patterns**: Production view implementations for UI integration
 
             **When to use:**
-            - Before implementing ANY new feature
-            - When you receive a business requirement
-            - To understand existing patterns and approaches
-            - To ensure consistency with IFS Cloud standards
+            - Before implementing ANY new feature (especially important now with production context)
+            - When you receive a business requirement (now with real IFS patterns)
+            - To understand existing patterns and approaches (production-validated)
+            - To ensure consistency with IFS Cloud standards (real production standards)
+            - To find GUI navigation patterns for new functionality
 
             **Examples:**
             - intelligent_context_analysis("Create customer order validation", "ORDER")
             - intelligent_context_analysis("Add pricing calculation", "FINANCE")
             - intelligent_context_analysis("Build user interface for products", "PRODUCT")
+            - intelligent_context_analysis("Add new navigation menu item", "NAVIGATOR")
 
             Args:
                 business_requirement: Description of what needs to be implemented

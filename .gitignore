@@ -28,6 +28,11 @@ ENV/
 .venv/
 .env/
 
+# Environment files (contain sensitive credentials)
+.env
+*.env
+!.env.template
+
 # IDEs
 .vscode/*
 !.vscode/tasks.json
@@ -81,3 +86,11 @@ Thumbs.db
 
 # Working directory
 _work/ 
+
+# Production data and configuration (contains sensitive information)
+production/config/database_config.py
+production/metadata/
+production/indexes/
+
+# Legacy database configuration (moved to production/)
+database_config.py

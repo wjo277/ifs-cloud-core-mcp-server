@@ -7,7 +7,8 @@ import os
 import sys
 import zipfile
 from pathlib import Path
-from typing import Set
+from typing import Set, Optional, Dict, Any
+from datetime import datetime
 
 from .config import ConfigManager
 from .server_fastmcp import IFSCloudMCPServer
@@ -233,6 +234,195 @@ async def handle_import_command(args) -> int:
         return 1
 
 
+def build_connection_string_from_args(args) -> str:
+    """Build Oracle connection string from command line arguments."""
+
+    # If direct connection string provided, use it
+    if hasattr(args, "connection") and args.connection:
+        return args.connection
+
+    # Build from individual components
+    driver = getattr(args, "driver", "oracle+oracledb")
+    host = args.host
+    port = getattr(args, "port", 1521)
+    username = args.username
+
+    # Get password from argument or environment
+    password = getattr(args, "password", None) or os.getenv("IFS_DB_PASSWORD")
+    if not password:
+        raise ValueError(
+            "Password must be provided via --password or IFS_DB_PASSWORD environment variable"
+        )
+
+    # Service name or SID
+    if hasattr(args, "service") and args.service:
+        return f"{driver}://{username}:{password}@{host}:{port}/?service_name={args.service}"
+    elif hasattr(args, "sid") and args.sid:
+        return f"{driver}://{username}:{password}@{host}:{port}/{args.sid}"
+    else:
+        raise ValueError("Must specify either --service or --sid")
+
+
+async def handle_extract_command(args) -> int:
+    """Handle the database extraction command."""
+    try:
+        # Validate dependencies first
+        try:
+            from .metadata_extractor import DatabaseMetadataExtractor, MetadataManager
+            from sqlalchemy import create_engine, text
+            import oracledb
+        except ImportError as e:
+            logging.error(f"✗ Missing database dependencies: {e}")
+            logging.error("Install with: uv add sqlalchemy oracledb")
+            return 1
+
+        # Build connection string
+        try:
+            connection_string = build_connection_string_from_args(args)
+            # Mask password in logs
+            log_connection = connection_string.split("@")[0].split(":")
+            if len(log_connection) >= 3:
+                log_connection[2] = "***"
+            logging.debug(f"Connection string: {':'.join(log_connection)}@***")
+        except Exception as e:
+            logging.error(f"✗ Failed to build connection string: {e}")
+            return 1
+
+        # Test database connection
+        logging.info(
+            f"🔌 Connecting to IFS Cloud database ({args.host or 'provided connection'})..."
+        )
+        start_time = datetime.now()
+
+        try:
+            engine = create_engine(connection_string, echo=(args.log_level == "DEBUG"))
+
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT 'Connected' as status FROM dual"))
+                status = result.fetchone()[0]
+                logging.info(f"✓ Database connection successful: {status}")
+
+        except Exception as e:
+            logging.error(f"✗ Database connection failed: {e}")
+            return 1
+
+        # Initialize metadata extractor
+        version = args.version
+        logging.info(f"🚀 Starting metadata extraction for IFS Cloud {version}...")
+
+        try:
+            extractor = DatabaseMetadataExtractor(db_connection=engine)
+            metadata_extract = extractor.extract_from_database(version)
+
+        except Exception as e:
+            logging.error(f"✗ Metadata extraction failed: {e}")
+            return 1
+
+        # Setup output directory - use same structure as other commands
+        if hasattr(args, "output") and args.output:
+            output_dir = Path(args.output)
+        else:
+            # Use same data directory structure as import/server commands
+            data_dir = get_data_directory()
+            output_dir = data_dir / "metadata"
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save metadata
+        try:
+            manager = MetadataManager(output_dir)
+            saved_path = manager.save_metadata(metadata_extract)
+
+        except Exception as e:
+            logging.error(f"✗ Failed to save metadata: {e}")
+            return 1
+
+        # Calculate extraction time
+        end_time = datetime.now()
+        extraction_time = (end_time - start_time).total_seconds()
+
+        # Prepare results
+        results = {
+            "success": True,
+            "ifs_version": metadata_extract.ifs_version,
+            "extraction_date": metadata_extract.extraction_date,
+            "extraction_time_seconds": extraction_time,
+            "output_path": str(saved_path),
+            "checksum": metadata_extract.checksum,
+            "statistics": {
+                "logical_units": len(metadata_extract.logical_units),
+                "modules": len(metadata_extract.modules),
+                "domain_mappings": len(metadata_extract.domain_mappings),
+                "views": len(metadata_extract.views),
+                "navigator_entries": len(metadata_extract.navigator_entries),
+            },
+        }
+
+        # Output results
+        if hasattr(args, "json") and args.json:
+            import json
+
+            print(json.dumps(results, indent=2, default=str))
+        elif hasattr(args, "quiet") and args.quiet:
+            pass  # Quiet mode - minimal output
+        else:
+            # Display user-friendly results
+            logging.info("=" * 80)
+            logging.info("🎉 METADATA EXTRACTION COMPLETE")
+            logging.info("=" * 80)
+            logging.info(f"📦 IFS Version: {results['ifs_version']}")
+            logging.info(f"📅 Extraction Date: {results['extraction_date']}")
+            logging.info(
+                f"⏱️  Extraction Time: {results['extraction_time_seconds']:.1f} seconds"
+            )
+            logging.info(f"💾 Saved to: {results['output_path']}")
+            logging.info(f"🔍 Checksum: {results['checksum']}")
+            logging.info("")
+            logging.info("📊 Statistics:")
+            stats = results["statistics"]
+            logging.info(f"   • Logical Units: {stats['logical_units']:,}")
+            logging.info(f"   • Modules: {stats['modules']:,}")
+            logging.info(f"   • Domain Mappings: {stats['domain_mappings']:,}")
+            logging.info(f"   • Views: {stats['views']:,}")
+            logging.info(f"   • Navigator Entries: {stats['navigator_entries']:,}")
+
+            # Show top modules by LU count
+            if metadata_extract.modules:
+                logging.info("")
+                logging.info("🏆 Top 10 modules by Logical Unit count:")
+                for i, module in enumerate(metadata_extract.modules[:10], 1):
+                    logging.info(
+                        f"   {i:2d}. {module.name:<20} - {module.lu_count:>4} LUs"
+                    )
+
+            # Show sample navigator entries
+            if metadata_extract.navigator_entries:
+                logging.info("")
+                logging.info("🧭 Sample Navigator Entries (GUI to Backend mapping):")
+                for i, nav in enumerate(metadata_extract.navigator_entries[:5], 1):
+                    logging.info(
+                        f"   {i:2d}. '{nav.label}' → {nav.entity_name} ({nav.projection})"
+                    )
+
+            logging.info("=" * 80)
+            logging.info(
+                "✅ Ready for enhanced search! Use this metadata with your IFS Cloud MCP server."
+            )
+
+        return 0
+
+    except KeyboardInterrupt:
+        logging.info("❌ Extraction cancelled by user")
+        return 130
+    except Exception as e:
+        logging.error(f"✗ Unexpected error during extraction: {e}")
+        if hasattr(args, "log_level") and args.log_level == "DEBUG":
+            import traceback
+
+            logging.error(traceback.format_exc())
+        return 1
+
+
 def handle_list_command(args) -> int:
     """Handle the list command."""
     import json
@@ -399,7 +589,7 @@ def main_sync():
 
     # Parse arguments first to determine which command to run
     parser = argparse.ArgumentParser(
-        description="IFS Cloud MCP Server with Tantivy search"
+        description="IFS Cloud MCP Server with Tantivy search and production database metadata extraction"
     )
 
     # Add subcommands
@@ -415,6 +605,60 @@ def main_sync():
         "--index-path", help="Custom path for search index (optional)"
     )
     import_parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level (default: INFO)",
+    )
+
+    # Extract command (requires async) - Extract metadata from database
+    extract_parser = subparsers.add_parser(
+        "extract", help="Extract metadata from IFS Cloud database for enhanced search"
+    )
+
+    # Connection options
+    extract_conn_group = extract_parser.add_argument_group("Connection Options")
+    extract_conn_group.add_argument(
+        "--connection",
+        "-c",
+        help="Complete Oracle connection string (oracle://user:pass@host:port/service)",
+    )
+    extract_conn_group.add_argument("--host", help="Database host")
+    extract_conn_group.add_argument(
+        "--port", type=int, default=1521, help="Database port (default: 1521)"
+    )
+    extract_conn_group.add_argument("--username", "-u", help="Database username")
+    extract_conn_group.add_argument(
+        "--password", "-p", help="Database password (or use IFS_DB_PASSWORD env var)"
+    )
+    extract_conn_group.add_argument("--service", help="Oracle service name")
+    extract_conn_group.add_argument(
+        "--sid", help="Oracle SID (alternative to service name)"
+    )
+    extract_conn_group.add_argument(
+        "--driver",
+        default="oracle+oracledb",
+        help="SQLAlchemy driver (default: oracle+oracledb)",
+    )
+
+    # Extraction options
+    extract_parser.add_argument(
+        "version", help="IFS Cloud version (e.g., '25.1.0', '24.2.1')"
+    )
+    extract_parser.add_argument(
+        "--output",
+        "-o",
+        help="Output directory for metadata files (default: platform data directory)",
+    )
+
+    # Output options
+    extract_parser.add_argument(
+        "--quiet", "-q", action="store_true", help="Suppress non-error output"
+    )
+    extract_parser.add_argument(
+        "--json", action="store_true", help="Output results as JSON"
+    )
+    extract_parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -457,6 +701,10 @@ def main_sync():
         # Import command requires async
         setup_logging(args.log_level)
         return asyncio.run(handle_import_command(args))
+    elif getattr(args, "command", None) == "extract":
+        # Extract command requires async
+        setup_logging(args.log_level)
+        return asyncio.run(handle_extract_command(args))
     elif getattr(args, "command", None) == "list":
         # List command is synchronous
         return handle_list_command(args)

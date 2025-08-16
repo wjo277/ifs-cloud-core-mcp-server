@@ -43,7 +43,7 @@ The enhanced search system extends the existing Tantivy-based file indexer with 
   - `enhanced_search()`: Perform metadata-aware search
   - `extract_metadata_from_mcp_results()`: Process MCP query results
 
-#### 4. Extraction Utilities (`extract_metadata.py`)
+#### 4. Extraction Utilities (Integrated CLI `extract` command)
 
 - **Purpose**: Command-line utilities for metadata extraction
 - **Features**:
@@ -329,7 +329,7 @@ See individual class documentation in:
 
 - `metadata_extractor.py` - Metadata extraction and management
 - `enhanced_search.py` - Enhanced search engine
-- `extract_metadata.py` - Command-line utilities
+- Integrated `extract` command - Database metadata extraction via main CLI
 - `indexer.py` - Enhanced indexer integration
 
 ---
