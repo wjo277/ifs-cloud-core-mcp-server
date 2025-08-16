@@ -436,15 +436,28 @@ class IFSCloudTantivyIndexer:
         logger.info("Indexer resources cleaned up")
 
     def _parse_query_terms(self, query: str) -> List[str]:
-        """Parse a query into meaningful terms for multi-term matching.
+        """Parse a query into meaningful terms for multi-term matching with synonym mapping.
 
         Args:
-            query: The search query (e.g., "Project Scope and Schedule")
+            query: The search query (e.g., "Project Scope and Schedule", "ExpenseSheet authorization")
 
         Returns:
-            List of significant terms (e.g., ["Project", "Scope", "Schedule"])
+            List of significant terms with synonyms expanded (e.g., ["Project", "Scope", "Schedule"])
         """
         import re
+
+        # Entity name synonym mappings (based on analysis findings)
+        entity_synonyms = {
+            "expensesheet": ["expenseheader", "expense_header", "trvexp"],
+            "expense_sheet": ["expenseheader", "expense_header", "trvexp"],
+            "expenseheader": ["expensesheet", "expense_sheet"],
+            "expense_header": ["expensesheet", "expense_sheet"],
+            # Add more mappings as discovered through usage analysis
+            "customerorder": ["customer_order", "custord"],
+            "customer_order": ["customerorder", "custord"],
+            "purchaseorder": ["purchase_order", "purord"],
+            "purchase_order": ["purchaseorder", "purord"],
+        }
 
         # Remove common stop words
         stop_words = {
@@ -495,11 +508,25 @@ class IFSCloudTantivyIndexer:
             and term.strip() not in stop_words
         ]
 
+        # Add synonyms for entity names
+        expanded_terms = list(significant_terms)  # Start with original terms
+        for term in significant_terms:
+            if term in entity_synonyms:
+                expanded_terms.extend(entity_synonyms[term])
+
+        # Remove duplicates while preserving order
+        unique_terms = []
+        seen = set()
+        for term in expanded_terms:
+            if term not in seen:
+                unique_terms.append(term)
+                seen.add(term)
+
         # Also include the original query as a single term for exact matching
         if query.strip():
-            significant_terms.insert(0, query.strip())
+            unique_terms.insert(0, query.strip())
 
-        return significant_terms
+        return unique_terms
 
     def _calculate_term_matches(
         self, filename: str, entity_name: str, query_terms: List[str]
@@ -568,32 +595,249 @@ class IFSCloudTantivyIndexer:
             "any_term_in_entity": entity_matches > 0,
         }
 
-    def _get_file_type_modifier(self, file_type: str) -> float:
-        """Get file type priority modifier.
+    def _get_file_type_modifier(
+        self, file_type: str, query: str = "", line_count: int = 0
+    ) -> float:
+        """Get file type priority modifier with context-aware boosting.
 
         Args:
             file_type: The file type/extension
+            query: The search query for context-aware prioritization
+            line_count: Number of lines in the file for business logic boosting
 
         Returns:
             Modifier value (positive for boost, negative for penalty)
         """
-        # Priority order: projection > client > views > plsql > entity > fragment > everything else > storage
-        if file_type.endswith(".projection"):
-            return 15.0  # Highest priority
-        elif file_type.endswith(".client"):
-            return 12.0  # Very high priority
+        modifier = 0.0
+
+        # Base file type priorities
+        if file_type.endswith(".plsql"):
+            modifier = 20.0  # Significantly boosted - core business logic
+            # Additional boost for large .plsql files (likely main business logic)
+            if line_count > 1000:
+                modifier += 15.0  # Major boost for substantial business logic files
+            elif line_count > 500:
+                modifier += 8.0  # Moderate boost for medium-sized business logic
+        elif file_type.endswith(".projection"):
+            modifier = 15.0  # High priority for UI integration
         elif file_type.endswith(".views"):
-            return 10.0  # High priority
-        elif file_type.endswith(".plsql"):
-            return 8.0  # Good priority
+            modifier = 12.0  # High priority for data views
+        elif file_type.endswith(".client"):
+            modifier = 10.0  # Good priority for client-side logic
         elif file_type.endswith(".entity"):
-            return 6.0  # Medium priority
+            modifier = 8.0  # Good priority for data models
         elif file_type.endswith(".fragment"):
-            return 4.0  # Lower priority
+            modifier = 6.0  # Medium priority for UI fragments
         elif file_type.endswith(".storage"):
-            return -10.0  # Penalty for storage files (less commonly used)
-        # All other file types get no adjustment (neutral)
-        return 0.0
+            modifier = -5.0  # Minor penalty for storage files
+
+        # Context-aware boosting based on query content
+        query_lower = query.lower()
+
+        # Authorization/approval workflow queries strongly favor .plsql files
+        authorization_keywords = [
+            "authorization",
+            "approve",
+            "reject",
+            "authorize",
+            "workflow",
+            "business logic",
+        ]
+        if any(keyword in query_lower for keyword in authorization_keywords):
+            if file_type.endswith(".plsql"):
+                modifier += (
+                    25.0  # Massive boost for business logic in authorization queries
+                )
+            elif file_type.endswith(".views"):
+                modifier += 12.0  # Good boost for authorization views
+            elif file_type.endswith(".projection"):
+                modifier += 8.0  # Moderate boost for authorization UI
+
+        # Entity-specific queries should prioritize entity files and main business logic
+        entity_keywords = ["entity", "header", "detail", "line", "master"]
+        if any(keyword in query_lower for keyword in entity_keywords):
+            if file_type.endswith(".entity"):
+                modifier += 10.0  # Strong boost for entity definitions
+            elif file_type.endswith(".plsql"):
+                modifier += 15.0  # Very strong boost for entity business logic
+
+        # UI/frontend queries favor projections and clients
+        ui_keywords = ["handling", "management", "client", "ui", "interface", "screen"]
+        if any(keyword in query_lower for keyword in ui_keywords):
+            if file_type.endswith(".projection"):
+                modifier += 18.0  # Strong boost for UI projections
+            elif file_type.endswith(".client"):
+                modifier += 15.0  # Strong boost for client files
+
+        return modifier
+
+    def _calculate_content_bonus(
+        self, doc, query: str, file_type: str, line_count: int
+    ) -> float:
+        """Calculate bonus points based on content analysis for business logic detection.
+
+        Args:
+            doc: Tantivy document
+            query: Search query
+            file_type: File extension/type
+            line_count: Number of lines in the file
+
+        Returns:
+            Content bonus score
+        """
+        bonus = 0.0
+        query_lower = query.lower()
+
+        # Get document functions and content for analysis
+        functions = doc.get_first("functions") or ""
+        content_preview = doc.get_first("content_preview") or ""
+
+        # Authorization/workflow method detection
+        authorization_methods = [
+            "authorize",
+            "approve",
+            "reject",
+            "validate",
+            "check",
+            "verify",
+            "workflow",
+            "state",
+            "transition",
+            "notify",
+            "send",
+        ]
+
+        # Check if file contains authorization-related methods
+        functions_lower = functions.lower()
+        content_lower = content_preview.lower()
+
+        authorization_method_count = 0
+        for method in authorization_methods:
+            if method in functions_lower or method in content_lower:
+                authorization_method_count += 1
+
+        # Bonus for authorization-related queries finding authorization methods
+        authorization_query_keywords = [
+            "authorization",
+            "approve",
+            "reject",
+            "authorize",
+            "workflow",
+        ]
+        is_authorization_query = any(
+            keyword in query_lower for keyword in authorization_query_keywords
+        )
+
+        if is_authorization_query and authorization_method_count > 0:
+            # Significant bonus for authorization queries finding files with authorization methods
+            bonus += min(authorization_method_count * 8.0, 40.0)  # Cap at 40 points
+
+            # Extra bonus for .plsql files with many authorization methods (main business logic)
+            if file_type.endswith(".plsql") and authorization_method_count >= 3:
+                bonus += 25.0
+
+            # Extra bonus for large files likely containing main business logic
+            if line_count > 1000:
+                bonus += 15.0
+
+        # Entity-specific query detection
+        entity_keywords = ["header", "detail", "line", "master", "entity"]
+        is_entity_query = any(keyword in query_lower for keyword in entity_keywords)
+
+        if is_entity_query:
+            # Boost files that likely contain the main entity definition
+            if file_type.endswith(".plsql") and line_count > 500:
+                bonus += 20.0  # Large plsql files are likely main business logic
+            elif file_type.endswith(".entity"):
+                bonus += 15.0  # Entity files for entity queries
+
+        # Business logic file detection
+        business_logic_indicators = [
+            "function",
+            "procedure",
+            "package",
+            "begin",
+            "end",
+            "exception",
+        ]
+        business_logic_count = sum(
+            1
+            for indicator in business_logic_indicators
+            if indicator in content_lower or indicator in functions_lower
+        )
+
+        # General bonus for substantial business logic content
+        if business_logic_count >= 3 and line_count > 200:
+            bonus += min(
+                business_logic_count * 2.0, 15.0
+            )  # Up to 15 points for business logic
+
+        return bonus
+
+    def _calculate_module_context_bonus(self, doc, query: str) -> float:
+        """Calculate bonus based on module context matching with query domain.
+
+        Args:
+            doc: Tantivy document
+            query: Search query
+
+        Returns:
+            Module context bonus score
+        """
+        bonus = 0.0
+        query_lower = query.lower()
+        module = doc.get_first("module") or ""
+        module_lower = module.lower()
+
+        # Module domain mappings based on common business terminology
+        domain_module_mappings = {
+            # Travel & Expense domain
+            "expense": "trvexp",
+            "travel": "trvexp",
+            "authorization": "trvexp",  # Expense authorization is common
+            "receipt": "trvexp",
+            "mileage": "trvexp",
+            # Order Management domain
+            "customer": "order",
+            "sales": "order",
+            "quote": "order",
+            "delivery": "order",
+            # Purchase domain
+            "purchase": "purch",
+            "supplier": "purch",
+            "vendor": "purch",
+            "requisition": "purch",
+            # Financial domain
+            "invoice": "accrul",
+            "payment": "accrul",
+            "accounting": "accrul",
+            "ledger": "accrul",
+            # Inventory domain
+            "inventory": "invent",
+            "parts": "invent",
+            "warehouse": "invent",
+            "stock": "invent",
+        }
+
+        # Check if query terms match expected module domains
+        for domain_term, expected_module in domain_module_mappings.items():
+            if domain_term in query_lower and expected_module in module_lower:
+                bonus += 20.0  # Strong bonus for domain-module alignment
+                break  # Only apply one domain bonus
+
+        # Specific high-value module context bonuses
+        if "expense" in query_lower and "trvexp" in module_lower:
+            bonus += (
+                25.0  # Very strong bonus for expense queries in travel expense module
+            )
+
+        if "authorization" in query_lower and "trvexp" in module_lower:
+            bonus += 30.0  # Massive bonus - authorization queries often relate to expense approval
+
+        if "customer" in query_lower and "order" in module_lower:
+            bonus += 25.0  # Strong bonus for customer order queries
+
+        return bonus
 
     def __enter__(self):
         """Context manager entry."""
@@ -1808,8 +2052,10 @@ class IFSCloudTantivyIndexer:
                     # Multi-term entity name matching
                     match_bonus += 15.0 * term_matches["partial_terms_in_entity"]
 
-                # Step 3: Apply file type priority adjustments
-                file_type_adjustment = self._get_file_type_modifier(doc_file_type)
+                # Step 3: Apply file type priority adjustments with context awareness
+                file_type_adjustment = self._get_file_type_modifier(
+                    doc_file_type, query, line_count
+                )
 
                 # Step 4: Apply document length normalization (prevent long documents from dominating)
                 length_factor = 1.0 / math.log(
@@ -1821,18 +2067,28 @@ class IFSCloudTantivyIndexer:
                     math.log(1 + pagerank_score * 10) if pagerank_score > 0 else 0.0
                 )
 
+                # Step 5a: Apply content analysis bonus for business logic keywords
+                content_bonus = self._calculate_content_bonus(
+                    doc, query, doc_file_type, line_count
+                )
+
+                # Step 5b: Apply module context bonus
+                module_bonus = self._calculate_module_context_bonus(doc, query)
+
                 # Step 6: Combine all factors with caps to prevent score explosion
                 final_score = (
                     (normalized_base_score * length_factor)
                     + match_bonus
                     + file_type_adjustment
                     + pagerank_bonus
+                    + content_bonus
+                    + module_bonus
                 )
 
-                # Cap the maximum score to prevent outliers, but allow higher scores for exact matches
+                # Cap the maximum score to prevent outliers, but allow higher scores for exact matches and business logic
                 final_score = min(
-                    final_score, 200.0
-                )  # Increased cap to accommodate higher exact match bonuses
+                    final_score, 300.0
+                )  # Increased cap to accommodate new bonuses (business logic + module context)
 
                 search_result = SearchResult(
                     path=doc.get_first("path") or "",
