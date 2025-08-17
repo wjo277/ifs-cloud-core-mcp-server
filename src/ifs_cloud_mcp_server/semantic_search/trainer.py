@@ -16,6 +16,7 @@ import numpy as np
 import logging
 import json
 import time
+import gc
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any, Union
 from dataclasses import dataclass, asdict
@@ -606,6 +607,14 @@ class SemanticTrainer:
                 f"\n{'='*20} EPOCH {epoch + 1}/{self.config.num_epochs} {'='*20}"
             )
 
+            # GPU memory monitoring
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated() / (1024**3)
+                reserved = torch.cuda.memory_reserved() / (1024**3)
+                logging.info(
+                    f"GPU Memory before epoch - Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB"
+                )
+
             # Training phase
             train_metrics = self.train_epoch()
 
@@ -625,6 +634,16 @@ class SemanticTrainer:
             # Save checkpoint
             if (epoch + 1) % self.config.save_every_n_epochs == 0:
                 self.save_checkpoint(epoch, train_metrics, val_metrics)
+
+            # GPU memory cleanup after each epoch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                gc.collect()  # Force garbage collection
+                allocated = torch.cuda.memory_allocated() / (1024**3)
+                reserved = torch.cuda.memory_reserved() / (1024**3)
+                logging.info(
+                    f"GPU Memory after cleanup - Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB"
+                )
 
             # Early stopping check
             if self.val_loader and self.should_stop_early(val_metrics):

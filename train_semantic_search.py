@@ -24,6 +24,18 @@ import time
 from pathlib import Path
 from typing import List, Optional
 import json
+import gc
+
+# GPU memory management
+import torch
+
+if torch.cuda.is_available():
+    # Clear any existing GPU memory
+    torch.cuda.empty_cache()
+    gc.collect()
+    # Set memory optimization settings
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
 
 # Set up the path to import our modules
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -180,7 +192,7 @@ def train_semantic_model(
         hidden_dim=128,  # Efficient hidden layers
         num_ifs_classes=50,  # IFS module/domain classification
         # Training hyperparameters
-        batch_size=16 if quick_test else 32,  # Conservative for RTX 5070 Ti memory
+        batch_size=16,  # Conservative batch size for stable training
         learning_rate=2e-5,  # Conservative for fine-tuning
         num_epochs=2 if quick_test else 8,  # Quick test vs full training
         warmup_steps=500,  # Gradual learning rate increase
@@ -449,6 +461,22 @@ Examples:
 
     # Setup logging
     setup_logging(args.log_level, args.log_file)
+
+    # GPU memory management for training
+    if torch.cuda.is_available() and not args.test_only:
+        logging.info("Initializing GPU memory management...")
+        torch.cuda.empty_cache()
+        gc.collect()
+        gpu_name = torch.cuda.get_device_name()
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        logging.info(f"GPU: {gpu_name} ({gpu_memory:.1f} GB total memory)")
+
+        # Check current memory usage
+        allocated = torch.cuda.memory_allocated() / (1024**3)
+        reserved = torch.cuda.memory_reserved() / (1024**3)
+        logging.info(
+            f"GPU Memory - Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB"
+        )
 
     try:
         # Print banner
