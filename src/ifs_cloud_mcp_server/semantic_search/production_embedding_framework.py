@@ -291,6 +291,11 @@ class ProductionEmbeddingFramework:
                             },
                         )()
                         temp_chunks.append(temp_chunk)
+                    else:
+                        # Log missing content for debugging
+                        self.logger.warning(
+                            f"⚠️ No temp content found for chunk {chunk.chunk_id} ({chunk.function_name})"
+                        )
 
                 if temp_chunks:
                     # Generate AI summaries
@@ -298,19 +303,28 @@ class ProductionEmbeddingFramework:
                         temp_chunks, batch_size=self.config.ai_batch_size
                     )
 
-                    # Transfer AI summaries to production chunks (derived work)
-                    for j, temp_chunk in enumerate(temp_chunks):
-                        if j < len(batch):
-                            production_chunk = batch[j]
-                            chunk_id = temp_chunk.chunk_id
-                            if chunk_id in summary_results:
-                                production_chunk.ai_summary = summary_results[chunk_id]
-                                production_chunk.ai_purpose = summary_results[
-                                    chunk_id
-                                ].get("purpose", "")
-                                production_chunk.ai_keywords = summary_results[
-                                    chunk_id
-                                ].get("keywords", None)
+                    # Transfer AI summaries to production chunks using proper mapping
+                    # Create a mapping from chunk_id to production_chunk for this batch
+                    chunk_id_to_production = {chunk.chunk_id: chunk for chunk in batch}
+
+                    successful_mappings = 0
+                    for temp_chunk in temp_chunks:
+                        chunk_id = temp_chunk.chunk_id
+                        if (
+                            chunk_id in summary_results
+                            and chunk_id in chunk_id_to_production
+                        ):
+                            production_chunk = chunk_id_to_production[chunk_id]
+                            summary_data = summary_results[chunk_id]
+
+                            production_chunk.ai_summary = summary_data
+                            production_chunk.ai_purpose = summary_data.get(
+                                "purpose", ""
+                            )
+                            production_chunk.ai_keywords = summary_data.get(
+                                "keywords", None
+                            )
+                            successful_mappings += 1
 
                             # Ensure minimum summary quality
                             if (
@@ -318,7 +332,22 @@ class ProductionEmbeddingFramework:
                                 and len(production_chunk.ai_summary)
                                 >= self.config.min_summary_length
                             ):
-                                self.stats.ai_enhanced_chunks += 1
+                                enhanced_chunks.append(production_chunk)
+                        else:
+                            # Debug mapping issues
+                            if chunk_id not in summary_results:
+                                self.logger.debug(
+                                    f"🔍 No summary result for chunk {chunk_id}"
+                                )
+                            if chunk_id not in chunk_id_to_production:
+                                self.logger.debug(
+                                    f"🔍 Chunk ID {chunk_id} not found in production mapping"
+                                )
+
+                    if successful_mappings < len(temp_chunks):
+                        self.logger.warning(
+                            f"⚠️ Only mapped {successful_mappings}/{len(temp_chunks)} chunk summaries"
+                        )
 
                 enhanced_chunks.extend(batch)
 

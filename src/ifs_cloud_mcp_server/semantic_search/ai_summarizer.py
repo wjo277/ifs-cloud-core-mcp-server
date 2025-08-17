@@ -436,7 +436,7 @@ class AISummarizer:
 
         context = " - ".join(context_parts) if context_parts else "IFS Cloud"
 
-        # Create the prompt with less boilerplate-generating language
+        # Create the prompt optimized for semantic search and similarity matching
         prompt = f"""You are an expert in IFS Cloud ERP system. Analyze this {function_context} from the {context}.
 
 CODE TO ANALYZE:
@@ -446,20 +446,23 @@ CODE TO ANALYZE:
 
 CONTEXT: {business_context}
 
-Provide a summary in this exact format (no thinking process, just the direct response):
+Create a summary optimized for semantic search and similarity matching. Use varied vocabulary and synonyms so users can find this code with different search terms.
 
-SUMMARY: [Direct business action/functionality - avoid starting with "This procedure/function/code"]
-PURPOSE: [Specific business scenario when this would be used]  
-KEYWORDS: [5-8 relevant business and technical keywords, comma-separated]
+Provide response in this exact format:
 
-Guidelines:
-- Start summaries with action verbs (e.g., "Updates customer pricing", "Calculates commission rates")
-- Focus on unique business value, not generic operations
-- Avoid repetitive phrases like "ensures business rules" or "maintains data integrity"
-- Skip obvious IFS/ERP terminology unless it's the core function
-- Be specific about what makes this different from similar functions
+SUMMARY: [Direct business action using action verbs - describe what it does, how it works, what business problem it solves]
+PURPOSE: [When/why developers would use this - include common scenarios, use cases, business situations]  
+KEYWORDS: [8-12 diverse keywords covering: business terms, technical terms, action verbs, domain concepts, synonyms]
 
-Keep it concise but informative. Do not include any thinking process or metadata."""
+Optimization guidelines:
+- Use rich, varied vocabulary and synonyms (e.g., "calculate/compute/determine", "validate/verify/check", "process/handle/manage")
+- Include both business domain terms AND technical implementation terms
+- Add context about business scenarios and use cases
+- Include related concepts someone might search for
+- Use natural language that matches how developers think and search
+- Avoid repetitive corporate language - be specific and descriptive
+
+Example good keywords: "account validation, financial verification, code part validation, business rules, data integrity, accounting standards, compliance checking, error handling\""""
 
         return prompt
 
@@ -655,59 +658,124 @@ Keep it concise but informative. Do not include any thinking process or metadata
 
     def _should_skip_chunk(self, chunk: CodeChunk) -> bool:
         """
-        Determine if chunk should be skipped due to low-value repetitive content
+        Ultra-selective filtering for VERY HIGH complexity procedures only
+        
+        Rules:
+        1. Skip all but the most complex procedures (complexity score < 15)
+        2. Skip built-in IFS standard procedures (developers already know these)  
+        3. Only process the most complex business logic procedures (15+ complexity)
         """
         content_lower = chunk.processed_content.lower()
-        
-        # Skip very short chunks that are likely just declarations
-        if len(chunk.processed_content.strip()) < 100:
-            return True
-            
-        # Skip chunks that are mostly comments or copyright notices
-        lines = chunk.processed_content.split('\n')
-        comment_lines = sum(1 for line in lines if line.strip().startswith('--') or line.strip().startswith('/*') or line.strip().startswith('*'))
-        if comment_lines > len(lines) * 0.7:  # More than 70% comments
-            return True
-        
-        # Skip generic validation procedures that follow common patterns
-        generic_patterns = [
-            'check_exist___', 'exist_control___', 'validate___',
-            'check_insert___', 'check_update___', 'check_delete___',
-            'unpack___', 'pack___', 'get_obj_state___',
-            'finite_state___', 'do_', 'get_', 'set_'
-        ]
-        
         function_name = getattr(chunk, 'function_name', '').lower()
-        if any(pattern in function_name for pattern in generic_patterns):
-            return True
+        lines = chunk.processed_content.split('\n')
             
-        # Skip chunks that contain mostly boilerplate IFS patterns
-        boilerplate_patterns = [
-            'error_sys.record_not_exist',
-            'client_sys.add_to_attr',
-            'client_sys.set_item_value', 
-            'finite_state_machine___',
-            'objversion control',
-            'rowversion check',
-            'user_allowed_site_api'
+        # Skip chunks that are mostly comments
+        comment_lines = sum(1 for line in lines if line.strip().startswith('--') or line.strip().startswith('/*') or line.strip().startswith('*'))
+        if comment_lines > len(lines) * 0.6:
+            return True
+        
+        # Rule 2: Skip built-in IFS standard procedures (developers know these)
+        standard_ifs_patterns = [
+            # Standard CRUD operations
+            'new___', 'modify___', 'remove___', 'delete___', 'insert___', 'update___',
+            'check_insert___', 'check_update___', 'check_delete___', 'check_common___',
+            
+            # Standard getters/setters
+            'get_', 'set_', 'get_obj_state___', 'set_obj_state___',
+            
+            # Standard validation/existence checks (keeping validate___ for complex business rules)
+            'check_exist___', 'exist_control___', 'check_ref___',
+            
+            # Standard object operations
+            'unpack___', 'pack___', 'finite_state___', 'do_',
+            'prepare_insert___', 'prepare_update___', 'prepare_delete___',
+            
+            # Standard security/access functions
+            'check_security___', 'check_access___', 'user_allowed_site_api',
+            
+            # Standard utility functions
+            'lock___', 'unlock___', 'exist___', 'decode', 'encode'
         ]
         
-        if any(pattern in content_lower for pattern in boilerplate_patterns):
+        # Check if function name matches standard IFS patterns
+        if any(function_name.startswith(pattern) for pattern in standard_ifs_patterns):
             return True
-            
-        # Skip chunks that are mostly just simple CRUD operations without business logic
-        crud_indicators = ['select', 'insert', 'update', 'delete', 'from', 'where']
-        crud_count = sum(1 for indicator in crud_indicators if indicator in content_lower)
-        other_logic = any(keyword in content_lower for keyword in [
-            'if', 'case', 'when', 'loop', 'while', 'for', 'cursor',
-            'exception', 'raise', 'commit', 'rollback', 'function', 'procedure'
-        ])
         
-        # Skip if mostly CRUD with little business logic
-        if crud_count >= 3 and not other_logic and len(content_lower) < 500:
+        # Rule 1: Analyze complexity - only process VERY HIGH complexity procedures
+        complexity_score = self._calculate_complexity(content_lower, lines)
+        
+        # Only process very high complexity procedures (complexity score >= 15)
+        # This ensures we only summarize the most complex business logic
+        if complexity_score < 15:
             return True
             
         return False
+    
+    def _calculate_complexity(self, content_lower: str, lines: List[str]) -> int:
+        """
+        Calculate complexity score based on control structures, SQL operations, and business logic
+        
+        Returns:
+        - 0-5: Low complexity (simple getters, basic validation)
+        - 6-14: Moderate complexity (some business logic, but not critical enough)
+        - 15+: VERY HIGH complexity (complex business logic, definitely worth AI summarizing)
+        """
+        complexity_score = 0
+        
+        # Control flow structures (high value indicators)
+        control_structures = {
+            'loop': 2, 'while': 2, 'for': 2,
+            'if': 1, 'case': 2, 'when': 1,
+            'cursor': 2, 'bulk collect': 2, 'forall': 2,
+        }
+        
+        for structure, score in control_structures.items():
+            count = content_lower.count(structure)
+            complexity_score += count * score
+        
+        # Exception handling (indicates business logic)
+        exception_handling = ['exception', 'raise', 'pragma exception_init']
+        complexity_score += sum(1 for eh in exception_handling if eh in content_lower) * 2
+        
+        # Database operations (moderate complexity)
+        db_operations = ['select', 'insert', 'update', 'delete', 'merge']
+        db_count = sum(1 for op in db_operations if op in content_lower)
+        if db_count > 2:  # Multiple DB operations indicate complexity
+            complexity_score += 2
+        elif db_count > 0:
+            complexity_score += 1
+        
+        # Transaction control (indicates important business logic)
+        transaction_control = ['commit', 'rollback', 'savepoint']
+        complexity_score += sum(1 for tc in transaction_control if tc in content_lower) * 2
+        
+        # Business logic indicators
+        business_logic = [
+            'calculate', 'process', 'validate', 'transform',
+            'convert', 'generate', 'create', 'build'
+        ]
+        complexity_score += sum(1 for bl in business_logic if bl in content_lower and len(content_lower) > 300)
+        
+        # Function calls (excluding simple API calls)
+        function_call_count = content_lower.count('(') - content_lower.count('--')  # Rough estimate
+        if function_call_count > 10:  # Many function calls indicate complexity
+            complexity_score += 2
+        elif function_call_count > 5:
+            complexity_score += 1
+        
+        # Line count factor (longer procedures are often more complex)
+        non_comment_lines = [line for line in lines if line.strip() and not line.strip().startswith('--')]
+        if len(non_comment_lines) > 100:
+            complexity_score += 2
+        elif len(non_comment_lines) > 50:
+            complexity_score += 1
+        
+        # Variable declarations (more variables = more complex logic)
+        variable_declarations = sum(1 for line in lines if ':=' in line or 'varchar2' in line.lower() or 'number' in line.lower())
+        if variable_declarations > 10:
+            complexity_score += 1
+        
+        return complexity_score
 
     async def summarize_chunks(
         self, chunks: List[CodeChunk], batch_size: int = 20
@@ -721,12 +789,54 @@ Keep it concise but informative. Do not include any thinking process or metadata
 
         logger.info(f"🤖 Starting AI summarization of {len(chunks)} chunks...")
         
-        # Filter out low-value chunks to reduce noise
-        valuable_chunks = [chunk for chunk in chunks if not self._should_skip_chunk(chunk)]
+        # Filter out low-value chunks to reduce noise with detailed complexity analysis
+        valuable_chunks = []
+        filter_stats = {
+            'too_short': 0,
+            'mostly_comments': 0,
+            'standard_ifs_procedures': 0,
+            'low_complexity': 0,
+            'excessive_boilerplate': 0
+        }
+        complexity_distribution = []
+        
+        for chunk in chunks:
+            if self._should_skip_chunk(chunk):
+                # Determine skip reason for statistics
+                content_lower = chunk.processed_content.lower()
+                function_name = getattr(chunk, 'function_name', '').lower()
+                lines = chunk.processed_content.split('\n')
+                
+                if len(chunk.processed_content.strip()) < 100:
+                    filter_stats['too_short'] += 1
+                elif sum(1 for line in lines if line.strip().startswith('--')) > len(lines) * 0.6:
+                    filter_stats['mostly_comments'] += 1
+                elif any(pattern in function_name for pattern in [
+                    'new___', 'modify___', 'get_', 'set_', 'check_insert___', 'check_exist___',
+                    'check_common___', 'insert___', 'update___', 'delete___'
+                ]):
+                    filter_stats['standard_ifs_procedures'] += 1
+                elif self._calculate_complexity(content_lower, lines) < 15:
+                    filter_stats['low_complexity'] += 1
+                else:
+                    filter_stats['excessive_boilerplate'] += 1
+            else:
+                valuable_chunks.append(chunk)
+                complexity_score = self._calculate_complexity(chunk.processed_content.lower(), chunk.processed_content.split('\n'))
+                complexity_distribution.append(complexity_score)
+        
         skipped_count = len(chunks) - len(valuable_chunks)
         
         if skipped_count > 0:
-            logger.info(f"⏭️ Skipped {skipped_count} low-value chunks (comments, simple CRUD, boilerplate)")
+            filter_percentage = (skipped_count / len(chunks)) * 100
+            avg_complexity = sum(complexity_distribution) / len(complexity_distribution) if complexity_distribution else 0
+            logger.info(f"⏭️ Filtered out {skipped_count} low-value chunks ({filter_percentage:.1f}% reduction)")
+            logger.info(f"   📊 Filter breakdown: Short={filter_stats['too_short']}, Comments={filter_stats['mostly_comments']}, Standard={filter_stats['standard_ifs_procedures']}, LowComplex={filter_stats['low_complexity']}, Boilerplate={filter_stats['excessive_boilerplate']}")
+            logger.info(f"   🎯 Kept chunks avg complexity: {avg_complexity:.1f} (15+ = VERY HIGH complexity threshold)")
+        
+        if len(valuable_chunks) == 0:
+            logger.warning("⚠️ All chunks were filtered out - consider loosening filter criteria")
+            return {}
 
         # Process in larger batches - Ollama can handle internal queuing
         for i in range(0, len(valuable_chunks), batch_size):
