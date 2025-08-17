@@ -491,6 +491,10 @@ class ProductionEmbeddingFramework:
         # Save production-safe results
         results = await self._save_production_results()
 
+        # Finalize AI cache with consolidation (only if AI summarizer was used)
+        if self.ai_summarizer:
+            self.ai_summarizer.finalize_cache()
+
         self.logger.info("✅ Production-safe embedding creation completed!")
 
         return {

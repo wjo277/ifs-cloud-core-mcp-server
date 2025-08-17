@@ -436,8 +436,8 @@ class AISummarizer:
 
         context = " - ".join(context_parts) if context_parts else "IFS Cloud"
 
-        # Create the prompt
-        prompt = f"""You are an expert in IFS Cloud ERP system. Analyze this {function_context} from the {context} and provide a concise, business-focused summary.
+        # Create the prompt with less boilerplate-generating language
+        prompt = f"""You are an expert in IFS Cloud ERP system. Analyze this {function_context} from the {context}.
 
 CODE TO ANALYZE:
 ```sql
@@ -448,15 +448,16 @@ CONTEXT: {business_context}
 
 Provide a summary in this exact format (no thinking process, just the direct response):
 
-SUMMARY: [1-2 sentences explaining what this code does in business terms]
-PURPOSE: [Why would a developer or business user need this function?]  
+SUMMARY: [Direct business action/functionality - avoid starting with "This procedure/function/code"]
+PURPOSE: [Specific business scenario when this would be used]  
 KEYWORDS: [5-8 relevant business and technical keywords, comma-separated]
 
-Focus on:
-- Business functionality over technical implementation
-- When and why someone would use this
-- Key business entities and operations involved
-- Clear, searchable language that matches how users think
+Guidelines:
+- Start summaries with action verbs (e.g., "Updates customer pricing", "Calculates commission rates")
+- Focus on unique business value, not generic operations
+- Avoid repetitive phrases like "ensures business rules" or "maintains data integrity"
+- Skip obvious IFS/ERP terminology unless it's the core function
+- Be specific about what makes this different from similar functions
 
 Keep it concise but informative. Do not include any thinking process or metadata."""
 
@@ -652,6 +653,62 @@ Keep it concise but informative. Do not include any thinking process or metadata
 
         return summary_data, False
 
+    def _should_skip_chunk(self, chunk: CodeChunk) -> bool:
+        """
+        Determine if chunk should be skipped due to low-value repetitive content
+        """
+        content_lower = chunk.processed_content.lower()
+        
+        # Skip very short chunks that are likely just declarations
+        if len(chunk.processed_content.strip()) < 100:
+            return True
+            
+        # Skip chunks that are mostly comments or copyright notices
+        lines = chunk.processed_content.split('\n')
+        comment_lines = sum(1 for line in lines if line.strip().startswith('--') or line.strip().startswith('/*') or line.strip().startswith('*'))
+        if comment_lines > len(lines) * 0.7:  # More than 70% comments
+            return True
+        
+        # Skip generic validation procedures that follow common patterns
+        generic_patterns = [
+            'check_exist___', 'exist_control___', 'validate___',
+            'check_insert___', 'check_update___', 'check_delete___',
+            'unpack___', 'pack___', 'get_obj_state___',
+            'finite_state___', 'do_', 'get_', 'set_'
+        ]
+        
+        function_name = getattr(chunk, 'function_name', '').lower()
+        if any(pattern in function_name for pattern in generic_patterns):
+            return True
+            
+        # Skip chunks that contain mostly boilerplate IFS patterns
+        boilerplate_patterns = [
+            'error_sys.record_not_exist',
+            'client_sys.add_to_attr',
+            'client_sys.set_item_value', 
+            'finite_state_machine___',
+            'objversion control',
+            'rowversion check',
+            'user_allowed_site_api'
+        ]
+        
+        if any(pattern in content_lower for pattern in boilerplate_patterns):
+            return True
+            
+        # Skip chunks that are mostly just simple CRUD operations without business logic
+        crud_indicators = ['select', 'insert', 'update', 'delete', 'from', 'where']
+        crud_count = sum(1 for indicator in crud_indicators if indicator in content_lower)
+        other_logic = any(keyword in content_lower for keyword in [
+            'if', 'case', 'when', 'loop', 'while', 'for', 'cursor',
+            'exception', 'raise', 'commit', 'rollback', 'function', 'procedure'
+        ])
+        
+        # Skip if mostly CRUD with little business logic
+        if crud_count >= 3 and not other_logic and len(content_lower) < 500:
+            return True
+            
+        return False
+
     async def summarize_chunks(
         self, chunks: List[CodeChunk], batch_size: int = 20
     ) -> Dict[str, Dict]:
@@ -663,10 +720,17 @@ Keep it concise but informative. Do not include any thinking process or metadata
         total_cached_summaries = 0
 
         logger.info(f"🤖 Starting AI summarization of {len(chunks)} chunks...")
+        
+        # Filter out low-value chunks to reduce noise
+        valuable_chunks = [chunk for chunk in chunks if not self._should_skip_chunk(chunk)]
+        skipped_count = len(chunks) - len(valuable_chunks)
+        
+        if skipped_count > 0:
+            logger.info(f"⏭️ Skipped {skipped_count} low-value chunks (comments, simple CRUD, boilerplate)")
 
         # Process in larger batches - Ollama can handle internal queuing
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i : i + batch_size]
+        for i in range(0, len(valuable_chunks), batch_size):
+            batch = valuable_chunks[i : i + batch_size]
 
             # Send all chunks in batch simultaneously to Ollama - it will queue internally
             tasks = [self.summarize_chunk(chunk) for chunk in batch]
@@ -700,14 +764,23 @@ Keep it concise but informative. Do not include any thinking process or metadata
         # Print newline to finish the progress line, then final summary
         print()  # Move to next line after progress updates
         
-        # Final save with full rebuild to ensure consistency
-        self.cache.save_cache(force_full_rebuild=True)
-        
         logger.info(
             f"🎉 Completed AI summarization: {len(results)} summaries total "
             f"({total_new_summaries} new, {total_cached_summaries} cached)"
         )
         return results
+
+    def finalize_cache(self):
+        """
+        Perform final cache cleanup and consolidation.
+        Call this at the end of the entire embedding process.
+        """
+        try:
+            logger.info("🔄 Performing final cache consolidation...")
+            self.cache.save_cache(force_full_rebuild=True)
+            logger.info("✅ Cache consolidation complete")
+        except Exception as e:
+            logger.error(f"❌ Failed to finalize cache: {e}")
 
     def enrich_chunk_with_summary(
         self, chunk: CodeChunk, summary_data: Dict
