@@ -478,7 +478,7 @@ class SemanticTrainer:
 
         # Mixed precision training
         if config.mixed_precision:
-            self.scaler = torch.cuda.amp.GradScaler()
+            self.scaler = torch.amp.GradScaler("cuda")  # Updated API
         else:
             self.scaler = None
 
