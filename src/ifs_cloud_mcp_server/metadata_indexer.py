@@ -316,6 +316,18 @@ class MetadataIndexer:
 
             total_docs = searcher.num_docs
 
+            # Handle empty index case
+            if total_docs == 0:
+                return {
+                    "total_files": 0,
+                    "total_lines": 0,
+                    "file_types": {},
+                    "modules": [],
+                    "avg_file_size": 0,
+                    "largest_file": "",
+                    "latest_modified": None,
+                }
+
             # Get file type distribution
             all_docs_query = tantivy.Query.all_query()
 

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from .indexer import IFSCloudIndexer, SearchResult
 from .search_engine import IFSCloudSearchEngine
+from .demo_search_integration import get_demo_search, initialize_demo_search
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,79 @@ class IFSCloudWebUI:
             return self.templates.TemplateResponse(
                 "modern_react.html", {"request": request}
             )
+
+        @self.app.get("/demo", response_class=HTMLResponse)
+        async def demo_page(request: Request):
+            """Serve the UniXcoder demo search interface."""
+            return self.templates.TemplateResponse(
+                "demo_search.html", {"request": request}
+            )
+
+        # ==================================================
+        # DEMO SEARCH ENDPOINTS (UniXcoder + FAISS)
+        # ==================================================
+
+        @self.app.get("/api/demo/status")
+        async def demo_status():
+            """Get status of the UniXcoder demo search engine."""
+            try:
+                demo_search = get_demo_search()
+                status = demo_search.get_status()
+                return JSONResponse(status)
+            except Exception as e:
+                logger.error(f"Error getting demo status: {e}")
+                return JSONResponse(
+                    {"status": "error", "error": str(e), "available": False}
+                )
+
+        @self.app.get("/api/demo/search")
+        async def demo_search_get(
+            query: str = Query(..., description="Search query"),
+            limit: int = Query(10, description="Maximum results"),
+            module: Optional[str] = Query(None, description="Filter by module"),
+            min_score: float = Query(0.2, description="Minimum similarity score"),
+        ):
+            """UniXcoder semantic search endpoint (GET)."""
+            try:
+                demo_search = get_demo_search()
+                results = await demo_search.search(
+                    query=query, limit=limit, module_filter=module, min_score=min_score
+                )
+                return JSONResponse(results)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Demo search error: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.post("/api/demo/search")
+        async def demo_search_post(request: SearchRequest):
+            """UniXcoder semantic search endpoint (POST)."""
+            try:
+                demo_search = get_demo_search()
+                results = await demo_search.search(
+                    query=request.query,
+                    limit=request.limit,
+                    module_filter=request.module,
+                    min_score=0.2,  # Default minimum score
+                )
+                return JSONResponse(results)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Demo search POST error: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.get("/api/demo/modules")
+        async def demo_modules():
+            """Get available modules in the demo search."""
+            try:
+                demo_search = get_demo_search()
+                modules = demo_search.get_available_modules()
+                return JSONResponse({"modules": modules, "total": len(modules)})
+            except Exception as e:
+                logger.error(f"Error getting demo modules: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
         @self.app.get("/api/search")
         async def search(
@@ -1041,6 +1115,21 @@ if __name__ == "__main__":
             level=logging.DEBUG,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
+
+        # Initialize demo search in background after server starts
+        print("🎯 UniXcoder demo search will initialize after server starts")
+        print("   Check /api/demo/status for initialization progress")
+
+        # Add startup event for demo search initialization
+        @web_ui.app.on_event("startup")
+        async def startup_event():
+            try:
+                print("🔧 Starting UniXcoder demo search initialization...")
+                await initialize_demo_search()
+                print("✅ UniXcoder demo search ready!")
+            except Exception as e:
+                print(f"⚠️ Demo search failed to initialize: {e}")
+                logger.error(f"Demo search initialization error: {e}")
 
         # Start the server
         uvicorn.run(web_ui.app, host="localhost", port=port, reload=False)

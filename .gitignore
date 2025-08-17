@@ -99,3 +99,12 @@ database_config.py
 src/ifs_cloud_mcp_server/models/
 *.pkl
 models/
+
+# Cache
+*cache*/
+
+# Demo
+demo*/
+
+# Archive
+archive/
