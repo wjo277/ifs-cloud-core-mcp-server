@@ -719,6 +719,33 @@ class EmbeddingCheckpointManager:
 
         return processed
 
+    def load_all_results(self) -> List[ProcessingResult]:
+        """Load all processing results from checkpoint files."""
+        results = []
+
+        if self.results_file.exists():
+            try:
+                with open(self.results_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            result_data = json.loads(line)
+                            # Convert back to ProcessingResult
+                            result = ProcessingResult(
+                                file_path=result_data["file_path"],
+                                success=result_data["success"],
+                                content_hash=result_data["content_hash"],
+                                summary=result_data.get("summary", ""),
+                                error_message=result_data.get("error_message", ""),
+                                processing_time=result_data.get("processing_time", 0.0),
+                                token_count=result_data.get("token_count", 0),
+                                embedding=result_data.get("embedding"),
+                            )
+                            results.append(result)
+            except Exception as e:
+                logger.warning(f"Failed to load all results: {e}")
+
+        return results
+
     def save_metadata(self, metadata: Dict[str, Any]) -> None:
         """Save processing metadata."""
         metadata["saved_at"] = datetime.now().isoformat()
@@ -1217,12 +1244,23 @@ class ProductionEmbeddingFramework:
         print(f"{'='*60}")
 
     async def run_embedding_pipeline(self, resume: bool = True) -> Dict[str, Any]:
-        """Run the complete embedding pipeline."""
-        logger.info("Starting production embedding pipeline")
+        """Run the complete embedding pipeline with separated AI summarization."""
+        logger.info("Starting production embedding pipeline (2-phase approach)")
 
-        # Check Ollama availability
-        if not self.ollama_processor.ensure_model():
-            raise RuntimeError("Ollama model not available")
+        # Phase 1: Basic processing and embeddings
+        phase1_stats = await self._run_phase1_basic_processing(resume)
+
+        # Phase 2: AI summarization pass
+        phase2_stats = await self._run_phase2_ai_summarization(resume)
+
+        # Combine stats
+        final_stats = {**phase1_stats, **phase2_stats, "pipeline_completed": True}
+
+        return final_stats
+
+    async def _run_phase1_basic_processing(self, resume: bool = True) -> Dict[str, Any]:
+        """Phase 1: Process files for basic embeddings and BM25S indexing without AI summaries."""
+        logger.info("🚀 Phase 1: Basic processing and embeddings")
 
         # Initialize UniXCoder model
         logger.info("Initializing UniXCoder embedding model...")
@@ -1250,14 +1288,13 @@ class ProductionEmbeddingFramework:
                 successful_count = progress.files_successful
                 failed_count = progress.files_failed
                 logger.info(
-                    f"Resuming from file {start_idx + 1}/{len(self.file_rankings)}"
+                    f"Resuming Phase 1 from file {start_idx + 1}/{len(self.file_rankings)}"
                 )
 
         # Save initial metadata
         metadata = {
             "framework_version": "1.0.0",
-            "model": self.ollama_processor.model,
-            "max_tokens": self.ollama_processor.max_tokens,
+            "phase": "basic_processing",
             "total_files": len(self.file_rankings),
             "started_at": start_time.isoformat(),
             "work_directory": str(self.work_dir),
@@ -1265,7 +1302,7 @@ class ProductionEmbeddingFramework:
         }
         self.checkpoint_manager.save_metadata(metadata)
 
-        # Process files sequentially
+        # Process files sequentially - Phase 1 (basic processing)
         for idx, file_metadata in enumerate(
             self.file_rankings[start_idx:], start=start_idx
         ):
@@ -1280,18 +1317,38 @@ class ProductionEmbeddingFramework:
                 failed_count += 1
                 continue
 
-            # Process file
+            # Phase 1: Create basic result without AI summarization
             logger.info(
-                f"Processing {file_metadata.file_name} (rank {file_metadata.rank})"
+                f"Phase 1: Processing {file_metadata.file_name} (rank {file_metadata.rank})"
             )
-            result = self.ollama_processor.process_file(content, file_metadata)
 
-            # Generate embedding if successful and model is available
-            if result.success and result.summary and embedding_available:
-                logger.debug(f"Generating embedding for {file_metadata.file_name}")
-                embedding = self.embedding_generator.generate_embedding(result.summary)
+            # Create basic result with content hash and metadata
+            content_hash = hashlib.sha256(content.encode()).hexdigest()
+
+            # Create a basic result for Phase 1 (no AI summary yet)
+            basic_result = ProcessingResult(
+                file_path=file_metadata.file_path,
+                success=True,
+                content_hash=content_hash,
+                summary="",  # Will be filled in Phase 2
+                error_message="",
+                processing_time=0.0,
+                token_count=0,
+                embedding=None,
+            )
+
+            # Generate UniXCoder embedding directly from raw content (not summary)
+            if embedding_available:
+                logger.debug(
+                    f"Generating UniXCoder embedding for {file_metadata.file_name}"
+                )
+                # Use truncated content for embedding to avoid memory issues
+                truncated_content = content[:8000] if len(content) > 8000 else content
+                embedding = self.embedding_generator.generate_embedding(
+                    truncated_content
+                )
                 if embedding:
-                    result.embedding = embedding
+                    basic_result.embedding = embedding
                     # Add to FAISS manager
                     self.faiss_manager.add_embedding(
                         embedding,
@@ -1302,23 +1359,20 @@ class ProductionEmbeddingFramework:
                             "rank": file_metadata.rank,
                             "importance_score": file_metadata.combined_importance_score,
                             "reference_count": file_metadata.reference_count,
-                            "content_hash": result.content_hash,
+                            "content_hash": content_hash,
                         },
                     )
 
-            # Save result and add to BM25S index
-            self.checkpoint_manager.save_result(result)
-            if result.success:
-                self.bm25_indexer.add_document(result)
+            # Save basic result (no AI summary yet) and add placeholder to BM25S
+            self.checkpoint_manager.save_result(basic_result)
+            # For Phase 1, we'll create a basic BM25S document using content excerpts
+            basic_result.summary = self._create_content_excerpt(content, file_metadata)
+            self.bm25_indexer.add_document(basic_result)
 
-            if result.success:
-                successful_count += 1
-                logger.info(
-                    f"✅ {file_metadata.file_name}: {len(result.summary or '')} chars"
-                )
-            else:
-                failed_count += 1
-                logger.warning(f"❌ {file_metadata.file_name}: {result.error_message}")
+            successful_count += 1
+            logger.info(
+                f"✅ Phase 1: {file_metadata.file_name} - embedding: {'✓' if basic_result.embedding is not None else '✗'}"
+            )
 
             processed_count = (idx - start_idx) + 1
 
@@ -1331,12 +1385,12 @@ class ProductionEmbeddingFramework:
                 self.checkpoint_manager.save_progress(progress)
                 self._print_progress(progress)
 
-        # Final statistics
+        # Phase 1 Final statistics
         end_time = datetime.now()
         total_time = (end_time - start_time).total_seconds()
 
-        # Build search indexes from all processed documents
-        logger.info("🔍 Building search indexes...")
+        # Build search indexes from Phase 1 data
+        logger.info("🔍 Building Phase 1 search indexes...")
         bm25_success = self.bm25_indexer.build_index()
 
         faiss_success = False
@@ -1346,18 +1400,18 @@ class ProductionEmbeddingFramework:
         else:
             logger.info("⚠️ Skipping FAISS index (UniXCoder not available)")
 
-        final_stats = {
-            "completed_at": end_time.isoformat(),
-            "total_processing_time": total_time,
-            "files_processed": successful_count + failed_count,
-            "files_successful": successful_count,
-            "files_failed": failed_count,
-            "success_rate": (
+        phase1_stats = {
+            "phase1_completed_at": end_time.isoformat(),
+            "phase1_processing_time": total_time,
+            "phase1_files_processed": successful_count + failed_count,
+            "phase1_files_successful": successful_count,
+            "phase1_files_failed": failed_count,
+            "phase1_success_rate": (
                 successful_count / (successful_count + failed_count)
                 if (successful_count + failed_count) > 0
                 else 0
             ),
-            "average_rate": (
+            "phase1_average_rate": (
                 (successful_count + failed_count) / total_time if total_time > 0 else 0
             ),
             "bm25_index_built": bm25_success,
@@ -1370,10 +1424,151 @@ class ProductionEmbeddingFramework:
             ),
         }
 
-        logger.info("🎉 Embedding pipeline completed!")
-        logger.info(f"📊 Final stats: {final_stats}")
+        logger.info("✅ Phase 1 completed: Basic processing and embeddings")
+        logger.info(
+            f"📊 Phase 1 stats: {successful_count}/{len(self.file_rankings)} files processed"
+        )
 
-        return final_stats
+        return phase1_stats
+
+    def _create_content_excerpt(self, content: str, file_metadata: FileMetadata) -> str:
+        """Create a content excerpt for basic BM25S indexing (Phase 1)."""
+        # Extract key elements for search indexing
+        lines = content.split("\n")
+
+        # Get first few lines of comments/documentation
+        comments = []
+        procedures = []
+        functions = []
+
+        for line in lines[:100]:  # Look at first 100 lines
+            stripped = line.strip()
+            if stripped.startswith("--") and len(stripped) > 5:
+                comments.append(stripped[2:].strip())
+            elif "PROCEDURE" in line.upper():
+                procedures.append(line.strip())
+            elif "FUNCTION" in line.upper():
+                functions.append(line.strip())
+
+        # Create structured excerpt
+        excerpt_parts = []
+        if comments:
+            excerpt_parts.append("Comments: " + " | ".join(comments[:3]))
+        if procedures:
+            excerpt_parts.append("Procedures: " + " | ".join(procedures[:3]))
+        if functions:
+            excerpt_parts.append("Functions: " + " | ".join(functions[:3]))
+
+        excerpt = " | ".join(excerpt_parts)
+
+        # Fallback to content start if no structured content found
+        if not excerpt:
+            excerpt = content[:1000]
+
+        return excerpt[:2000]  # Limit excerpt size
+
+    async def _run_phase2_ai_summarization(self, resume: bool = True) -> Dict[str, Any]:
+        """Phase 2: AI summarization pass using Ollama."""
+        logger.info("🤖 Phase 2: AI Summarization Pass")
+
+        # Check Ollama availability
+        if not self.ollama_processor.ensure_model():
+            logger.warning("Ollama model not available - skipping AI summarization")
+            return {
+                "phase2_completed": False,
+                "phase2_error": "Ollama model not available",
+            }
+
+        start_time = datetime.now()
+        summarized_count = 0
+        failed_count = 0
+
+        # Get all results that need AI summarization
+        all_results = self.checkpoint_manager.load_all_results()
+
+        logger.info(
+            f"Phase 2: Processing {len(all_results)} files for AI summarization"
+        )
+
+        for idx, result in enumerate(all_results):
+            # Skip if already has AI summary
+            if (
+                result.summary and len(result.summary) > 100
+            ):  # Assume AI summaries are longer
+                continue
+
+            # Find the file metadata
+            file_metadata = None
+            for metadata in self.file_rankings:
+                if metadata.file_path == result.file_path:
+                    file_metadata = metadata
+                    break
+
+            if not file_metadata:
+                failed_count += 1
+                continue
+
+            # Read file content again
+            content = self._read_file_content(file_metadata.file_path)
+            if content is None:
+                failed_count += 1
+                continue
+
+            logger.info(
+                f"Phase 2: AI summarizing {file_metadata.file_name} ({idx+1}/{len(all_results)})"
+            )
+
+            # Process with Ollama
+            ai_result = self.ollama_processor.process_file(content, file_metadata)
+
+            if ai_result.success and ai_result.summary:
+                # Update the result with AI summary
+                result.summary = ai_result.summary
+                result.token_count = ai_result.token_count
+                result.processing_time = ai_result.processing_time
+
+                # Re-save with AI summary
+                self.checkpoint_manager.save_result(result)
+
+                summarized_count += 1
+                logger.info(
+                    f"✅ Phase 2: {file_metadata.file_name}: {len(ai_result.summary)} chars"
+                )
+            else:
+                failed_count += 1
+                logger.warning(
+                    f"❌ Phase 2: {file_metadata.file_name}: {ai_result.error_message}"
+                )
+
+            # Progress update every 10 files
+            if (idx + 1) % 10 == 0:
+                logger.info(
+                    f"Phase 2 Progress: {idx+1}/{len(all_results)} files processed"
+                )
+
+        end_time = datetime.now()
+        total_time = (end_time - start_time).total_seconds()
+
+        phase2_stats = {
+            "phase2_completed_at": end_time.isoformat(),
+            "phase2_processing_time": total_time,
+            "phase2_files_processed": summarized_count + failed_count,
+            "phase2_files_successful": summarized_count,
+            "phase2_files_failed": failed_count,
+            "phase2_success_rate": (
+                summarized_count / (summarized_count + failed_count)
+                if (summarized_count + failed_count) > 0
+                else 0
+            ),
+            "phase2_average_rate": (
+                (summarized_count + failed_count) / total_time if total_time > 0 else 0
+            ),
+        }
+
+        logger.info("✅ Phase 2 completed: AI Summarization")
+        logger.info(f"📊 Phase 2 stats: {summarized_count} files summarized")
+
+        return phase2_stats
 
 
 # CLI Interface Functions
