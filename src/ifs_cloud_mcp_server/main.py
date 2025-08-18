@@ -13,6 +13,7 @@ from datetime import datetime
 from .config import ConfigManager
 from .server_fastmcp import IFSCloudMCPServer
 from .indexer import IFSCloudIndexer
+from .embedding_processor import run_embedding_command
 
 
 def setup_logging(level: str = "INFO"):
@@ -694,6 +695,33 @@ def main_sync():
         help="Log level (default: INFO)",
     )
 
+    # Embedding command (requires async) - Create embeddings using production framework
+    embedding_parser = subparsers.add_parser(
+        "embed",
+        help="Create embeddings using production framework with PageRank prioritization",
+    )
+    embedding_parser.add_argument(
+        "--model",
+        default="phi4-mini:3.8b-q4_K_M",
+        help="Ollama model to use (default: phi4-mini:3.8b-q4_K_M)",
+    )
+    embedding_parser.add_argument(
+        "--max-files",
+        type=int,
+        help="Maximum number of files to process (for testing/partial runs)",
+    )
+    embedding_parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Don't resume from checkpoint, start fresh",
+    )
+    embedding_parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level (default: INFO)",
+    )
+
     args = parser.parse_args()
 
     # Route to appropriate handler based on command
@@ -705,6 +733,10 @@ def main_sync():
         # Extract command requires async
         setup_logging(args.log_level)
         return asyncio.run(handle_extract_command(args))
+    elif getattr(args, "command", None) == "embed":
+        # Embedding command requires async
+        setup_logging(args.log_level)
+        return asyncio.run(run_embedding_command(args))
     elif getattr(args, "command", None) == "list":
         # List command is synchronous
         return handle_list_command(args)

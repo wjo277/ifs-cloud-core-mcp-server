@@ -85,6 +85,52 @@
       },
       "problemMatcher": [],
       "detail": "Index a directory of IFS Cloud files"
+    },
+    {
+      "label": "Create Embeddings",
+      "type": "shell",
+      "command": "uv",
+      "args": ["run", "python", "-m", "src.ifs_cloud_mcp_server.main", "embed"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "new",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "detail": "Create embeddings using production framework with PageRank prioritization"
+    },
+    {
+      "label": "Create Test Embeddings",
+      "type": "shell",
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "src.ifs_cloud_mcp_server.main",
+        "embed",
+        "--max-files",
+        "10"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "new",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": [],
+      "detail": "Create embeddings for top 10 files only (for testing)"
     }
   ],
   "inputs": [

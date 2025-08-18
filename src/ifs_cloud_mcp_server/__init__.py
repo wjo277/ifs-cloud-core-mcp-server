@@ -12,7 +12,7 @@ __author__ = "IFS Cloud Team"
 __all__ = []
 
 try:
-    from .server import IFSCloudMCPServer
+    from .server_fastmcp import IFSCloudMCPServer
 
     __all__.append("IFSCloudMCPServer")
 except ImportError:
@@ -34,5 +34,12 @@ try:
     from .config import ConfigManager
 
     __all__.append("ConfigManager")
+except ImportError:
+    pass
+
+try:
+    from .embedding_processor import ProductionEmbeddingFramework
+
+    __all__.append("ProductionEmbeddingFramework")
 except ImportError:
     pass
