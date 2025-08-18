@@ -23,6 +23,8 @@ import logging
 import subprocess
 import sys
 import time
+import re
+import os
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -45,6 +47,241 @@ except ImportError as e:
     SEARCH_DEPENDENCIES_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+class BuiltInPageRankAnalyzer:
+    """Built-in PageRank analyzer for PL/SQL files."""
+
+    def __init__(self, work_dir: Path, max_context_tokens: int = 65536):
+        self.work_dir = Path(work_dir)
+        self.max_context_tokens = max_context_tokens
+
+        # Regex patterns for PL/SQL analysis
+        self.api_call_patterns = [
+            re.compile(r"([A-Z][a-z]+(?:[A-Z][a-z]*)*_API)\.", re.IGNORECASE),
+            re.compile(r"PROCEDURE\s+([A-Z][a-z_]+)", re.IGNORECASE),
+            re.compile(r"FUNCTION\s+([A-Z][a-z_]+)", re.IGNORECASE),
+        ]
+
+        self.error_message_pattern = re.compile(
+            r'Error_SYS\.(?:Record_General|Appl_General)\s*\(\s*[\'"]([^\'"]+)[\'"]',
+            re.IGNORECASE | re.MULTILINE,
+        )
+
+        self.comment_pattern = re.compile(r"--.*$", re.MULTILINE)
+
+    def extract_file_info(self, file_path: Path) -> Dict[str, Any]:
+        """Extract metadata and references from a PL/SQL file."""
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="ignore")
+
+            # Extract API calls
+            api_calls = set()
+            for pattern in self.api_call_patterns:
+                matches = pattern.findall(content)
+                api_calls.update(
+                    match.upper() if isinstance(match, str) else match[0].upper()
+                    for match in matches
+                )
+
+            # Count procedures and functions
+            procedure_count = len(re.findall(r"\bPROCEDURE\s+", content, re.IGNORECASE))
+            function_count = len(re.findall(r"\bFUNCTION\s+", content, re.IGNORECASE))
+
+            # Extract error messages
+            error_messages = self.error_message_pattern.findall(content)
+
+            # Count comments
+            comments = self.comment_pattern.findall(content)
+
+            # Determine API name from file path
+            file_name = file_path.name
+            api_name = file_name.replace(".plsql", "") + "_API"
+            if not api_name.endswith("_API"):
+                api_name = api_name.replace("_API", "") + "_API"
+
+            return {
+                "file_path": str(file_path),
+                "relative_path": str(file_path.relative_to(self.work_dir)),
+                "file_name": file_name,
+                "api_name": api_name,
+                "file_size_mb": file_path.stat().st_size / (1024 * 1024),
+                "procedure_count": procedure_count,
+                "function_count": function_count,
+                "error_message_count": len(error_messages),
+                "comment_count": len(comments),
+                "api_calls": list(api_calls),
+            }
+
+        except Exception as e:
+            logger.warning(f"Failed to process {file_path}: {e}")
+            return None
+
+    def build_reference_graph(
+        self, files_info: List[Dict[str, Any]]
+    ) -> Dict[str, Set[str]]:
+        """Build reference graph between files."""
+        # Create API name to file mapping
+        api_to_file = {}
+        for info in files_info:
+            if info:
+                api_to_file[info["api_name"]] = info["file_path"]
+
+        # Build reference graph
+        reference_graph = {}
+        for info in files_info:
+            if not info:
+                continue
+
+            file_path = info["file_path"]
+            reference_graph[file_path] = set()
+
+            # Find references to other APIs
+            for api_call in info["api_calls"]:
+                if api_call in api_to_file and api_to_file[api_call] != file_path:
+                    reference_graph[file_path].add(api_to_file[api_call])
+
+        return reference_graph
+
+    def calculate_pagerank(
+        self,
+        reference_graph: Dict[str, Set[str]],
+        damping: float = 0.85,
+        max_iterations: int = 100,
+        tolerance: float = 1e-6,
+    ) -> Dict[str, float]:
+        """Calculate PageRank scores for files."""
+        files = list(reference_graph.keys())
+        n = len(files)
+
+        if n == 0:
+            return {}
+
+        # Initialize PageRank scores
+        pagerank = {file: 1.0 / n for file in files}
+
+        for iteration in range(max_iterations):
+            new_pagerank = {}
+
+            for file in files:
+                # Base score from damping
+                new_score = (1 - damping) / n
+
+                # Add contributions from referencing files
+                for other_file in files:
+                    if file in reference_graph[other_file]:
+                        out_links = len(reference_graph[other_file])
+                        if out_links > 0:
+                            new_score += damping * pagerank[other_file] / out_links
+
+                new_pagerank[file] = new_score
+
+            # Check convergence
+            diff = sum(abs(new_pagerank[file] - pagerank[file]) for file in files)
+            if diff < tolerance:
+                logger.info(f"PageRank converged after {iteration + 1} iterations")
+                break
+
+            pagerank = new_pagerank
+
+        return pagerank
+
+    def analyze_files(self) -> Dict[str, Any]:
+        """Perform complete PageRank analysis of PL/SQL files."""
+        logger.info("🔍 Starting built-in PageRank analysis...")
+
+        # Find all PL/SQL files
+        plsql_files = list(self.work_dir.rglob("*.plsql"))
+        logger.info(f"Found {len(plsql_files)} PL/SQL files")
+
+        if not plsql_files:
+            raise ValueError(f"No PL/SQL files found in {self.work_dir}")
+
+        # Extract file information
+        logger.info("📊 Extracting file metadata...")
+        files_info = []
+        for i, file_path in enumerate(plsql_files):
+            if i % 10 == 0:
+                logger.info(f"Processed {i}/{len(plsql_files)} files")
+
+            info = self.extract_file_info(file_path)
+            if info:
+                files_info.append(info)
+
+        logger.info(f"Successfully processed {len(files_info)} files")
+
+        # Build reference graph
+        logger.info("🔗 Building reference graph...")
+        reference_graph = self.build_reference_graph(files_info)
+
+        # Calculate PageRank
+        logger.info("⚡ Calculating PageRank scores...")
+        pagerank_scores = self.calculate_pagerank(reference_graph)
+
+        # Create reverse reference count (who calls this file)
+        reference_counts = {}
+        for file_path in reference_graph:
+            reference_counts[file_path] = 0
+
+        for file_path, references in reference_graph.items():
+            for referenced_file in references:
+                reference_counts[referenced_file] += 1
+
+        # Combine all data and calculate importance scores
+        file_rankings = []
+        for info in files_info:
+            if not info:
+                continue
+
+            file_path = info["file_path"]
+            pagerank_score = pagerank_scores.get(file_path, 0)
+            reference_count = reference_counts.get(file_path, 0)
+
+            # Combined importance score
+            importance_score = pagerank_score * 10000 + reference_count * 0.8
+
+            file_rankings.append(
+                {
+                    **info,
+                    "pagerank_score": pagerank_score,
+                    "reference_count": reference_count,
+                    "combined_importance_score": importance_score,
+                    "calls_count": len(info["api_calls"]),
+                    "called_by_count": reference_count,
+                }
+            )
+
+        # Sort by importance score
+        file_rankings.sort(key=lambda x: x["combined_importance_score"], reverse=True)
+
+        # Add rank numbers
+        for i, ranking in enumerate(file_rankings):
+            ranking["rank"] = i + 1
+
+        # Prepare final analysis
+        analysis_metadata = {
+            "work_directory": str(self.work_dir),
+            "max_context_tokens": self.max_context_tokens,
+            "analysis_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "processing_stats": {
+                "total_files_found": len(plsql_files),
+                "total_files_processed": len(files_info),
+                "total_procedures_found": sum(
+                    info["procedure_count"] for info in files_info
+                ),
+                "total_functions_found": sum(
+                    info["function_count"] for info in files_info
+                ),
+                "total_error_messages_found": sum(
+                    info["error_message_count"] for info in files_info
+                ),
+                "total_comments_found": sum(
+                    info["comment_count"] for info in files_info
+                ),
+            },
+        }
+
+        return {"analysis_metadata": analysis_metadata, "file_rankings": file_rankings}
 
 
 @dataclass
@@ -835,8 +1072,11 @@ class ProductionEmbeddingFramework:
             embedding_dim=768,  # UniXCoder default dimension
         )
 
-        # Load analysis data
-        self.file_rankings = self._load_analysis_data()
+        # Initialize built-in analyzer
+        self.analyzer = BuiltInPageRankAnalyzer(self.work_dir)
+
+        # Load or generate analysis data
+        self.file_rankings = self._load_or_generate_analysis_data()
 
         logger.info(
             f"Initialized embedding framework with {len(self.file_rankings)} files"
@@ -867,6 +1107,38 @@ class ProductionEmbeddingFramework:
         except Exception as e:
             logger.error(f"Failed to load analysis data: {e}")
             raise
+
+    def _load_or_generate_analysis_data(self) -> List[FileMetadata]:
+        """Load existing analysis or generate new analysis if missing."""
+        # Try to load existing analysis first
+        if self.analysis_file.exists():
+            logger.info(f"📊 Loading existing analysis from {self.analysis_file}")
+            return self._load_analysis_data()
+
+        # Generate new analysis
+        logger.info(f"📊 Analysis file not found, generating new PageRank analysis...")
+        logger.info(f"   This may take a few minutes for {self.work_dir}...")
+
+        # Run built-in analyzer
+        analysis_data = self.analyzer.analyze_files()
+
+        # Save analysis to file
+        with open(self.analysis_file, "w", encoding="utf-8") as f:
+            json.dump(analysis_data, f, indent=2, ensure_ascii=False)
+        logger.info(f"✅ Analysis saved to {self.analysis_file}")
+
+        # Convert to FileMetadata format
+        rankings = []
+        for item in analysis_data.get("file_rankings", []):
+            metadata = FileMetadata(**item)
+            rankings.append(metadata)
+
+            # Apply max_files limit if specified
+            if self.max_files and len(rankings) >= self.max_files:
+                break
+
+        logger.info(f"Generated analysis for {len(rankings)} files")
+        return rankings
 
     def _read_file_content(self, file_path: str) -> Optional[str]:
         """Read file content safely."""
@@ -1114,8 +1386,8 @@ def setup_embedding_directories(base_dir: Path) -> Tuple[Path, Path, Path]:
     if not work_dir.exists():
         raise FileNotFoundError(f"Work directory not found: {work_dir}")
 
-    if not analysis_file.exists():
-        raise FileNotFoundError(f"Analysis file not found: {analysis_file}")
+    # Analysis file will be generated automatically if it doesn't exist
+    # (Removed the requirement check since we have built-in analyzer)
 
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
