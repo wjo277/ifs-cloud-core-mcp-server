@@ -56,8 +56,295 @@ class BuiltInPageRankAnalyzer:
         self.work_dir = Path(work_dir)
         self.max_context_tokens = max_context_tokens
 
+    def _fix_api_naming(self, api_name: str) -> str:
+        """Fix API naming by adding underscores before capital letters (except first and PI in API)."""
+        if not api_name:
+            return api_name
+            
+        # Split by _API suffix if present
+        if api_name.endswith("_API"):
+            base_name = api_name[:-4]  # Remove _API
+            suffix = "_API"
+        else:
+            base_name = api_name
+            suffix = ""
+            
+        # Add underscores before capital letters, except:
+        # - First character
+        # - Letters that are part of "PI" in "_API" (if at the end)
+        fixed_name = ""
+        for i, char in enumerate(base_name):
+            if i > 0 and char.isupper():
+                # Don't add underscore if the previous char already is one
+                if fixed_name[-1] != '_':
+                    fixed_name += '_'
+            fixed_name += char
+        
+        return fixed_name.upper() + suffix
+
+    def _extract_changelog_lines(self, content: str) -> List[str]:
+        """Extract 10 changelog messages from header: first, last, and 8 evenly spaced between."""
+        try:
+            # Find actual changelog entries and extract just the messages
+            lines = content.split('\n')
+            changelog_messages = []
+            seen_messages = set()  # Track unique messages to avoid duplicates
+            
+            # Look for changelog entries that follow the pattern:
+            # --  DDMMYY   sign    description
+            # --  DD/MM/YYYY  sign    description  
+            for i, line in enumerate(lines[:100]):  # Check first 100 lines for changelog
+                stripped = line.strip()
+                
+                # Look for lines that contain actual changelog entries (dates + signatures + descriptions)
+                if stripped.startswith('--') and len(stripped) > 10:
+                    # Skip decorative lines (only dashes, headers, etc.)
+                    if all(c in '- ' for c in stripped[2:].strip()):
+                        continue
+                    if 'Date' in stripped and 'Sign' in stripped and 'History' in stripped:
+                        continue
+                    if stripped.endswith('-'):
+                        continue
+                    if 'Logical unit:' in stripped or 'Component:' in stripped:
+                        continue
+                    if 'Template Version' in stripped:
+                        continue
+                    if 'layer Core' in stripped:
+                        continue
+                        
+                    # Look for patterns that indicate actual changelog entries
+                    # Pattern 1: --  DDMMYY   name   description
+                    # Pattern 2: --  DD/MM/YYYY  name  description
+                    stripped_content = stripped[2:].strip()  # Remove '--' prefix
+                    
+                    # Check if it starts with a date-like pattern
+                    words = stripped_content.split()
+                    if len(words) >= 3:
+                        first_word = words[0]
+                        # Date patterns: DDMMYY (6 digits) or DD/MM/YYYY
+                        if (first_word.isdigit() and len(first_word) == 6) or \
+                           ('/' in first_word and len(first_word.split('/')) == 3):
+                            # Extract just the message part (skip date and developer name)
+                            # Typical format: date developer_name message...
+                            # Skip first two words (date and name) and take the rest
+                            if len(words) > 2:
+                                message = ' '.join(words[2:])  # Everything after date and name
+                                if message and len(message.strip()) > 3:  # Only meaningful messages
+                                    clean_message = message.strip()
+                                    # Only add if we haven't seen this exact message before
+                                    if clean_message.lower() not in seen_messages:
+                                        changelog_messages.append(clean_message)
+                                        seen_messages.add(clean_message.lower())
+                    
+            # If no changelog entries found, look for any meaningful comment lines with messages
+            if not changelog_messages:
+                for i, line in enumerate(lines[:50]):
+                    stripped = line.strip()
+                    if stripped.startswith('--') and len(stripped) > 15:
+                        # Skip pure decoration
+                        if all(c in '- ' for c in stripped[2:].strip()):
+                            continue
+                        if stripped.endswith('-' * 5):  # Lines ending with many dashes
+                            continue
+                        # Look for lines that seem to contain actual content descriptions
+                        content_part = stripped[2:].strip()
+                        if any(keyword in content_part.lower() for keyword in 
+                               ['added', 'created', 'updated', 'fixed', 'changed', 'removed', 'modified']):
+                            # Only add unique messages
+                            if content_part.lower() not in seen_messages:
+                                changelog_messages.append(content_part)
+                                seen_messages.add(content_part.lower())
+                        
+            # Select 10 messages: first, last, and 8 evenly spaced
+            if len(changelog_messages) <= 10:
+                return changelog_messages
+            elif len(changelog_messages) < 3:
+                return changelog_messages
+            else:
+                selected = [changelog_messages[0]]  # First
+                
+                # Calculate 8 evenly spaced indices between first and last
+                if len(changelog_messages) > 2:
+                    middle_count = min(8, len(changelog_messages) - 2)
+                    if middle_count > 0:
+                        step = (len(changelog_messages) - 2) / (middle_count + 1)
+                        for i in range(1, middle_count + 1):
+                            idx = int(1 + step * i)
+                            if idx < len(changelog_messages) - 1:
+                                selected.append(changelog_messages[idx])
+                
+                selected.append(changelog_messages[-1])  # Last
+                return selected[:10]
+                
+        except Exception as e:
+            logger.warning(f"Could not extract changelog lines: {e}")
+            return []
+
+    def _extract_procedure_function_names(self, content: str) -> List[str]:
+        """Extract 10 procedure/function names: balanced 50/50 public/private when available, excluding common IFS framework methods."""
+        try:
+            # Standard IFS framework method prefixes to exclude (these are generic implementation patterns)
+            excluded_prefixes = [
+                'GET_', 'SET_', 'CHECK_INSERT_', 'CHECK_UPDATE_', 'CHECK_DELETE_', 'CHECK_COMMON_',
+                'DO_INSERT_', 'DO_UPDATE_', 'DO_DELETE_', 'DO_MODIFY_', 'DO_REMOVE_',
+                'IS_', 'HAS_', 'EXIST_', 'EXISTS_', 'VALIDATE_', 'VERIFY_',
+                'UNPACK_', 'PACK_', 'PREPARE_', 'FINISH_', 'COMPLETE_',
+                'NEW__', 'MODIFY__', 'REMOVE__', 'DELETE__', 'INSERT__', 'UPDATE__',
+                'PRE_', 'POST_', 'BEFORE_', 'AFTER_',
+                'GET_OBJSTATE', 'GET_OBJVERSION', 'GET_OBJID', 'GET_STATE',
+                'FINITE_STATE_', 'SET_STATE_', 'GET_DB_VALUES_', 'GET_CLIENT_VALUES_',
+                'DECODE_', 'ENCODE_', 'GET_KEY_BY_', 'GET_KEYS_BY_'
+            ]
+            
+            # Additional exact method names to exclude (common framework methods)
+            excluded_exact = [
+                'GET_OBJKEY', 'GET_VERSION_BY_KEYS', 'GET_VERSION_BY_ID', 'EXIST',
+                'GET_FULL_NAME', 'GET_DESCRIPTION', 'GET_INFO', 'GET_BY_KEYS',
+                'LOCK__', 'NEW__', 'MODIFY__', 'REMOVE__', 'DELETE__'
+            ]
+            
+            # Separate collections for public and private methods
+            public_names = []  # Methods without underscores at the end
+            private_names = []  # Methods ending with ___
+            seen_names = set()  # Track unique names to avoid duplicates
+            
+            lines = content.split('\n')
+            
+            # Look for procedure and function declarations
+            for line in lines:
+                stripped = line.strip().upper()
+                
+                # Match PROCEDURE declarations
+                proc_match = re.match(r'^\s*PROCEDURE\s+(\w+)', stripped)
+                if proc_match:
+                    proc_name = proc_match.group(1)
+                    if proc_name.lower() not in seen_names:
+                        # Check if this should be excluded
+                        should_exclude = False
+                        
+                        # Check prefixes (excluding the __ or ___ suffix for comparison)
+                        base_name = proc_name.rstrip('_')
+                        for prefix in excluded_prefixes:
+                            if base_name.startswith(prefix):
+                                should_exclude = True
+                                break
+                        
+                        # Check exact matches (excluding suffix)
+                        if base_name in excluded_exact:
+                            should_exclude = True
+                        
+                        if not should_exclude:
+                            method_entry = f"PROCEDURE {proc_name}"
+                            if proc_name.endswith('___'):
+                                private_names.append(method_entry)
+                            else:
+                                public_names.append(method_entry)
+                            seen_names.add(proc_name.lower())
+                
+                # Match FUNCTION declarations  
+                func_match = re.match(r'^\s*FUNCTION\s+(\w+)', stripped)
+                if func_match:
+                    func_name = func_match.group(1)
+                    if func_name.lower() not in seen_names:
+                        # Check if this should be excluded
+                        should_exclude = False
+                        
+                        # Check prefixes (excluding the __ or ___ suffix for comparison)
+                        base_name = func_name.rstrip('_')
+                        for prefix in excluded_prefixes:
+                            if base_name.startswith(prefix):
+                                should_exclude = True
+                                break
+                        
+                        # Check exact matches (excluding suffix)
+                        if base_name in excluded_exact:
+                            should_exclude = True
+                        
+                        if not should_exclude:
+                            method_entry = f"FUNCTION {func_name}"
+                            if func_name.endswith('___'):
+                                private_names.append(method_entry)
+                            else:
+                                public_names.append(method_entry)
+                            seen_names.add(func_name.lower())
+            
+            # Balance between public and private methods (50/50 when both available)
+            total_needed = 10
+            
+            if len(public_names) == 0:
+                # Only private methods available
+                selected_names = private_names[:total_needed]
+            elif len(private_names) == 0:
+                # Only public methods available
+                selected_names = public_names[:total_needed]
+            else:
+                # Both types available - aim for 50/50 balance
+                public_needed = min(total_needed // 2, len(public_names))
+                private_needed = min(total_needed - public_needed, len(private_names))
+                
+                # If one category doesn't have enough, take more from the other
+                if private_needed < (total_needed - public_needed):
+                    public_needed = min(total_needed - private_needed, len(public_names))
+                elif public_needed < (total_needed - private_needed):
+                    private_needed = min(total_needed - public_needed, len(private_names))
+                
+                # Select evenly spaced methods from each category
+                selected_public = self._select_evenly_spaced(public_names, public_needed)
+                selected_private = self._select_evenly_spaced(private_names, private_needed)
+                
+                # Combine them, maintaining some alternation for better representation
+                selected_names = []
+                pub_idx = priv_idx = 0
+                for i in range(total_needed):
+                    if pub_idx < len(selected_public) and priv_idx < len(selected_private):
+                        # Alternate between public and private
+                        if i % 2 == 0:
+                            selected_names.append(selected_public[pub_idx])
+                            pub_idx += 1
+                        else:
+                            selected_names.append(selected_private[priv_idx])
+                            priv_idx += 1
+                    elif pub_idx < len(selected_public):
+                        selected_names.append(selected_public[pub_idx])
+                        pub_idx += 1
+                    elif priv_idx < len(selected_private):
+                        selected_names.append(selected_private[priv_idx])
+                        priv_idx += 1
+            
+            return selected_names[:total_needed]
+                
+        except Exception as e:
+            logger.warning(f"Could not extract procedure/function names: {e}")
+            return []
+
+    def _select_evenly_spaced(self, items: List[str], count: int) -> List[str]:
+        """Select evenly spaced items from a list."""
+        if not items or count <= 0:
+            return []
+        if count >= len(items):
+            return items
+        if len(items) < 3:
+            return items[:count]
+            
+        selected = [items[0]]  # First
+        
+        # Calculate evenly spaced indices between first and last
+        if len(items) > 2 and count > 2:
+            middle_count = min(count - 2, len(items) - 2)
+            if middle_count > 0:
+                step = (len(items) - 2) / (middle_count + 1)
+                for i in range(1, middle_count + 1):
+                    idx = int(1 + step * i)
+                    if idx < len(items) - 1:
+                        selected.append(items[idx])
+        
+        if count > 1 and len(items) > 1:
+            selected.append(items[-1])  # Last
+            
+        return selected[:count]
+
     def extract_file_info(self, file_path: Path) -> Dict[str, Any]:
-        """Extract API calls from a PL/SQL file (fast and simple)."""
+        """Extract comprehensive file info including API calls, procedures, functions, and changelog."""
         try:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
 
@@ -70,6 +357,10 @@ class BuiltInPageRankAnalyzer:
             # API calls are already correctly formatted, just add them
             api_calls.update(match.upper() for match in matches)
 
+            # Count procedures and functions
+            procedure_count = len(re.findall(r'\bPROCEDURE\s+\w+', content, re.IGNORECASE))
+            function_count = len(re.findall(r'\bFUNCTION\s+\w+', content, re.IGNORECASE))
+
             # Determine this file's API name from file path
             file_name = file_path.name
             if file_name.endswith(".plsql"):
@@ -77,13 +368,24 @@ class BuiltInPageRankAnalyzer:
             else:
                 api_name = file_path.stem.upper() + "_API"
 
+            # Apply API naming fixes
+            api_name = self._fix_api_naming(api_name)
+
+            # Extract changelog and procedure/function names
+            changelog_lines = self._extract_changelog_lines(content)
+            procedure_function_names = self._extract_procedure_function_names(content)
+
             return {
                 "file_path": str(file_path),
                 "relative_path": str(file_path.relative_to(self.work_dir)),
                 "file_name": file_name,
                 "api_name": api_name,
                 "file_size_mb": file_path.stat().st_size / (1024 * 1024),
+                "procedure_count": procedure_count,
+                "function_count": function_count,
                 "api_calls": list(api_calls),  # Who this file calls
+                "changelog_lines": changelog_lines,
+                "procedure_function_names": procedure_function_names,
             }
 
         except Exception as e:
@@ -94,11 +396,13 @@ class BuiltInPageRankAnalyzer:
         self, files_info: List[Dict[str, Any]]
     ) -> Dict[str, Set[str]]:
         """Build reference graph between files."""
-        # Create API name to file mapping
+        # Create API name to file mapping (case-insensitive)
         api_to_file = {}
         for info in files_info:
             if info:
-                api_to_file[info["api_name"]] = info["file_path"]
+                # Normalize API name to uppercase for consistent matching
+                normalized_api_name = info["api_name"].upper()
+                api_to_file[normalized_api_name] = info["file_path"]
 
         # Build reference graph
         reference_graph = {}
@@ -109,10 +413,12 @@ class BuiltInPageRankAnalyzer:
             file_path = info["file_path"]
             reference_graph[file_path] = set()
 
-            # Find references to other APIs
+            # Find references to other APIs (case-insensitive matching)
             for api_call in info["api_calls"]:
-                if api_call in api_to_file and api_to_file[api_call] != file_path:
-                    reference_graph[file_path].add(api_to_file[api_call])
+                # Normalize API call to uppercase for consistent matching
+                normalized_api_call = api_call.upper()
+                if normalized_api_call in api_to_file and api_to_file[normalized_api_call] != file_path:
+                    reference_graph[file_path].add(api_to_file[normalized_api_call])
 
         return reference_graph
 
@@ -144,16 +450,40 @@ class BuiltInPageRankAnalyzer:
         logger.info("🔗 Building reference graph...")
         reference_graph = self.build_reference_graph(files_info)
 
-        # Simplified ranking - just sort alphabetically by file path for consistency
+        # Calculate PageRank based on how many other files reference each file
+        logger.info("📊 Calculating PageRank scores based on API references...")
+        file_reference_counts = {}
+        
+        # Initialize reference count for each file
+        for info in files_info:
+            file_path = info["file_path"]
+            file_reference_counts[file_path] = 0
+        
+        # Count incoming references (how many files call this file's API)
+        for file_path, referenced_files in reference_graph.items():
+            for referenced_file in referenced_files:
+                if referenced_file in file_reference_counts:
+                    file_reference_counts[referenced_file] += 1
+        
+        # Create rankings with PageRank scores
         file_rankings = []
         for info in files_info:
             if not info:
                 continue
+            
+            file_path = info["file_path"]
+            reference_count = file_reference_counts.get(file_path, 0)
+            
+            # Enhanced info with PageRank data
+            enhanced_info = {
+                **info,
+                "reference_count": reference_count,
+                "pagerank_score": reference_count,  # Simple: more references = higher rank
+            }
+            file_rankings.append(enhanced_info)
 
-            file_rankings.append(info)
-
-        # Sort by file path for consistent ordering
-        file_rankings.sort(key=lambda x: x["file_path"])
+        # Sort by reference count (PageRank) - most referenced files first
+        file_rankings.sort(key=lambda x: x["reference_count"], reverse=True)
 
         # Add rank numbers
         for i, ranking in enumerate(file_rankings):
@@ -1778,7 +2108,7 @@ class ProductionEmbeddingFramework:
         if progress.current_file <= len(self.file_rankings):
             current_file = self.file_rankings[progress.current_file - 1]
             print(f"📄 Current: {current_file.file_name}")
-            print(f"🎯 Importance: {current_file.combined_importance_score:.1f}")
+            print(f"🎯 Rank: #{current_file.rank}")
 
         print(f"{'='*60}")
 
@@ -2247,8 +2577,6 @@ class ProductionEmbeddingFramework:
                             "file_name": file_metadata.file_name,
                             "api_name": file_metadata.api_name,
                             "rank": file_metadata.rank,
-                            "importance_score": file_metadata.combined_importance_score,
-                            "reference_count": file_metadata.reference_count,
                             "content_hash": result.content_hash,
                             "summary_length": len(result.summary) if result.summary else 0,
                         },
