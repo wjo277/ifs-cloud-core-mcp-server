@@ -357,10 +357,6 @@ class BuiltInPageRankAnalyzer:
             # API calls are already correctly formatted, just add them
             api_calls.update(match.upper() for match in matches)
 
-            # Count procedures and functions
-            procedure_count = len(re.findall(r'\bPROCEDURE\s+\w+', content, re.IGNORECASE))
-            function_count = len(re.findall(r'\bFUNCTION\s+\w+', content, re.IGNORECASE))
-
             # Determine this file's API name from file path
             file_name = file_path.name
             if file_name.endswith(".plsql"):
@@ -381,8 +377,6 @@ class BuiltInPageRankAnalyzer:
                 "file_name": file_name,
                 "api_name": api_name,
                 "file_size_mb": file_path.stat().st_size / (1024 * 1024),
-                "procedure_count": procedure_count,
-                "function_count": function_count,
                 "api_calls": list(api_calls),  # Who this file calls
                 "changelog_lines": changelog_lines,
                 "procedure_function_names": procedure_function_names,
@@ -514,8 +508,6 @@ class FileMetadata:
     file_name: str
     api_name: str
     file_size_mb: float
-    procedure_count: int
-    function_count: int
     api_calls: List[str] = field(default_factory=list)
     changelog_lines: List[str] = field(default_factory=list)
     procedure_function_names: List[str] = field(default_factory=list)
@@ -532,6 +524,7 @@ class ProcessingResult:
     summary: Optional[str] = None
     embedding: Optional[List[float]] = None
     bm25_text: Optional[str] = None  # Text used for BM25S indexing
+    content_excerpt: Optional[str] = None  # Phase 1 content excerpt
     error_message: Optional[str] = None
     tokens_used: Optional[int] = None
     has_ai_summary: bool = False  # True if summary is AI-generated, False if just content excerpt
@@ -644,8 +637,10 @@ class FAISSIndexManager:
 
     def add_embedding(self, embedding: List[float], metadata: dict) -> None:
         """Add an embedding and its metadata to the index."""
+        logger.debug(f"🔹 Adding embedding to FAISS index: {len(embedding)} dimensions, metadata: {metadata.get('file_name', 'unknown')}")
         self.embeddings.append(embedding)
         self.embedding_metadata.append(metadata)
+        logger.info(f"📊 FAISS index now has {len(self.embeddings)} embeddings")
 
     def build_faiss_index(self) -> bool:
         """Build FAISS index from collected embeddings."""
@@ -780,8 +775,6 @@ class BM25SIndexer:
             # Ranking context (for query-document alignment)
             f"rank:{metadata.rank}",
             # Code structure (for technical queries)
-            f"procedures:{metadata.procedure_count}",
-            f"functions:{metadata.function_count}",
             # Rich content (for semantic-lexical bridge)
             summary or "",
         ]
@@ -791,10 +784,15 @@ class BM25SIndexer:
 
     def add_document(self, result: ProcessingResult) -> None:
         """Add a processed document to the BM25S corpus."""
-        if not result.success or not result.summary:
+        if not result.success:
             return
 
-        bm25_text = self.prepare_text_for_bm25(result.summary, result.file_metadata)
+        # Use summary if available (Phase 2), otherwise use content excerpt (Phase 1)
+        text_for_indexing = result.summary or result.content_excerpt
+        if not text_for_indexing:
+            return
+
+        bm25_text = self.prepare_text_for_bm25(text_for_indexing, result.file_metadata)
 
         self.corpus_texts.append(bm25_text)
         self.corpus_metadata.append(
@@ -1009,9 +1007,10 @@ class EmbeddingCheckpointManager:
         return processed
 
     def load_all_results(self) -> List[ProcessingResult]:
-        """Load all processing results from checkpoint files."""
-        results = []
+        """Load all processing results from checkpoint files, merging Phase 1, 2A, and 2B."""
+        results_by_path = {}
 
+        # Load Phase 1 results (basic processing)
         if self.results_file.exists():
             try:
                 with open(self.results_file, "r", encoding="utf-8") as f:
@@ -1030,8 +1029,6 @@ class EmbeddingCheckpointManager:
                                     file_name=file_metadata_data["file_name"],
                                     api_name=file_metadata_data["api_name"],
                                     file_size_mb=file_metadata_data["file_size_mb"],
-                                    procedure_count=file_metadata_data.get("procedure_count", 0),
-                                    function_count=file_metadata_data.get("function_count", 0),
                                     api_calls=file_metadata_data.get("api_calls", []),
                                     changelog_lines=file_metadata_data.get("changelog_lines", []),
                                     procedure_function_names=file_metadata_data.get("procedure_function_names", []),
@@ -1046,15 +1043,80 @@ class EmbeddingCheckpointManager:
                                     embedding=result_data.get("embedding"),
                                     has_ai_summary=result_data.get("has_ai_summary", False),  # Default to False for backward compatibility
                                 )
+                                results_by_path[file_metadata.file_path] = result
                             else:
                                 # Old format - skip for now as we're using new format
                                 continue
-                                
-                            results.append(result)
             except Exception as e:
-                logger.warning(f"Failed to load all results: {e}")
+                logger.warning(f"Failed to load Phase 1 results: {e}")
 
-        return results
+        # Load Phase 2A results (AI summaries) and merge
+        phase2a_file = self.checkpoint_dir / "phase2a_results.jsonl"
+        if phase2a_file.exists():
+            try:
+                with open(phase2a_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            result_data = json.loads(line)
+                            
+                            if "file_metadata" in result_data:
+                                file_path = result_data["file_metadata"]["file_path"]
+                                
+                                # Update existing result or create new one
+                                if file_path in results_by_path:
+                                    # Update existing result with AI summary
+                                    result = results_by_path[file_path]
+                                    result.summary = result_data.get("summary", result.summary)
+                                    result.has_ai_summary = result_data.get("has_ai_summary", False)
+                                    result.tokens_used = result_data.get("tokens_used", result.tokens_used)
+                                else:
+                                    # Create new result (shouldn't happen in normal flow)
+                                    file_metadata_data = result_data["file_metadata"]
+                                    file_metadata = FileMetadata(
+                                        rank=file_metadata_data["rank"],
+                                        file_path=file_metadata_data["file_path"],
+                                        relative_path=file_metadata_data["relative_path"],
+                                        file_name=file_metadata_data["file_name"],
+                                        api_name=file_metadata_data["api_name"],
+                                        file_size_mb=file_metadata_data["file_size_mb"],
+                                        api_calls=file_metadata_data.get("api_calls", []),
+                                        changelog_lines=file_metadata_data.get("changelog_lines", []),
+                                        procedure_function_names=file_metadata_data.get("procedure_function_names", []),
+                                    )
+                                    
+                                    result = ProcessingResult(
+                                        file_metadata=file_metadata,
+                                        success=result_data["success"],
+                                        processing_time=result_data.get("processing_time", 0.0),
+                                        content_hash=result_data["content_hash"],
+                                        summary=result_data.get("summary", ""),
+                                        embedding=result_data.get("embedding"),
+                                        has_ai_summary=result_data.get("has_ai_summary", False),
+                                    )
+                                    results_by_path[file_path] = result
+            except Exception as e:
+                logger.warning(f"Failed to load Phase 2A results: {e}")
+
+        # Load Phase 2B results (embeddings) and merge
+        phase2b_file = self.checkpoint_dir / "phase2b_results.jsonl"
+        if phase2b_file.exists():
+            try:
+                with open(phase2b_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            result_data = json.loads(line)
+                            
+                            if "file_metadata" in result_data:
+                                file_path = result_data["file_metadata"]["file_path"]
+                                
+                                # Update existing result with embedding
+                                if file_path in results_by_path:
+                                    result = results_by_path[file_path]
+                                    result.embedding = result_data.get("embedding", result.embedding)
+            except Exception as e:
+                logger.warning(f"Failed to load Phase 2B results: {e}")
+
+        return list(results_by_path.values())
 
     def save_metadata(self, metadata: Dict[str, Any]) -> None:
         """Save processing metadata."""
@@ -1077,7 +1139,8 @@ class OllamaProcessor:
         """Check if Ollama is available and model is pulled."""
         try:
             result = subprocess.run(
-                ["ollama", "list"], capture_output=True, text=True, timeout=30
+                ["ollama", "list"], capture_output=True, text=True, timeout=30,
+                encoding="utf-8", errors="ignore"
             )
             return result.returncode == 0 and self.model in result.stdout
         except Exception as e:
@@ -1096,6 +1159,8 @@ class OllamaProcessor:
                 capture_output=True,
                 text=True,
                 timeout=600,  # 10 minutes for model pull
+                encoding="utf-8",
+                errors="ignore",
             )
             return result.returncode == 0
         except Exception as e:
@@ -1230,14 +1295,6 @@ class OllamaProcessor:
             "database_operations": 0.02,  # 2% - Data access patterns
         }
 
-        # Adjust priorities based on file metadata
-        if metadata.procedure_count > metadata.function_count * 2:
-            signal_priorities["procedures"] = 0.35  # File is procedure-heavy
-            signal_priorities["functions"] = 0.20
-        elif metadata.function_count > metadata.procedure_count * 2:
-            signal_priorities["functions"] = 0.35  # File is function-heavy
-            signal_priorities["procedures"] = 0.20
-
         # Calculate token allocation for each signal
         balanced_content = []
 
@@ -1314,7 +1371,6 @@ FILE METADATA & CONTEXT:
 - File: {metadata.file_name}
 - API: {metadata.api_name}  
 - Rank: #{metadata.rank}
-- Code Structure: {metadata.procedure_count} procedures, {metadata.function_count} functions
 - API Calls: {len(metadata.api_calls)} external dependencies
 {changelog_section}{procedures_section}
 EXTRACTED SIGNALS (BALANCED FOR SEMANTIC ANALYSIS):
@@ -1388,7 +1444,9 @@ Focus on business value, system relationships, and searchable concepts rather th
             subprocess.run(
                 ["taskkill", "/f", "/im", "ollama.exe"],
                 capture_output=True,
-                timeout=30
+                timeout=30,
+                encoding="utf-8",
+                errors="ignore"
             )
             
             # Wait a moment for processes to terminate
@@ -1399,7 +1457,9 @@ Focus on business value, system relationships, and searchable concepts rather th
             subprocess.run(
                 ["ollama", "run", self.model, "Ready to process files."],
                 capture_output=True,
-                timeout=120  # Allow time for model loading
+                timeout=120,  # Allow time for model loading
+                encoding="utf-8",
+                errors="ignore"
             )
             
             logger.info("✅ Ollama server restarted successfully")
@@ -1424,14 +1484,18 @@ Focus on business value, system relationships, and searchable concepts rather th
             result = subprocess.run(
                 ["taskkill", "/f", "/im", "ollama.exe"],
                 capture_output=True,
-                timeout=30
+                timeout=30,
+                encoding="utf-8",
+                errors="ignore"
             )
             
             # Also try to stop any ollama_llama_server processes
             subprocess.run(
                 ["taskkill", "/f", "/im", "ollama_llama_server.exe"],
                 capture_output=True,
-                timeout=30
+                timeout=30,
+                encoding="utf-8",
+                errors="ignore"
             )
             
             # Wait a moment for processes to fully terminate and VRAM to be freed
@@ -1466,6 +1530,8 @@ Focus on business value, system relationships, and searchable concepts rather th
                 text=True,
                 capture_output=True,
                 timeout=300,  # 5 minutes per file
+                encoding="utf-8",
+                errors="ignore",
             )
 
             processing_time = time.time() - start_time
@@ -1488,6 +1554,8 @@ Focus on business value, system relationships, and searchable concepts rather th
                             text=True,
                             capture_output=True,
                             timeout=300,
+                            encoding="utf-8",
+                            errors="ignore",
                         )
                         
                         processing_time = time.time() - retry_start
@@ -1976,14 +2044,8 @@ class ProductionEmbeddingFramework:
         for i, file_path in enumerate(plsql_files[:self.max_files]):
             # Read content to extract actual metadata
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
-                
-                # Extract metadata using patterns similar to OllamaProcessor
-                procedure_count = len(re.findall(r'\bPROCEDURE\s+\w+', content, re.IGNORECASE))
-                function_count = len(re.findall(r'\bFUNCTION\s+\w+', content, re.IGNORECASE))
-                error_message_count = len(re.findall(r'\bError_SYS\.\w+|RAISE_APPLICATION_ERROR|EXCEPTION\b', content, re.IGNORECASE))
-                comment_count = len(re.findall(r'--.*$|/\*.*?\*/', content, re.MULTILINE | re.DOTALL))
                 
                 # Extract API calls - look for patterns like Package_API.method
                 api_call_pattern = r'\b([A-Z][A-Za-z_]*_API)\.([A-Za-z_]+)\s*\('
@@ -1999,7 +2061,6 @@ class ProductionEmbeddingFramework:
                 
             except Exception as e:
                 logger.warning(f"Could not extract metadata from {file_path}: {e}")
-                procedure_count = function_count = error_message_count = comment_count = 0
                 api_calls = []
                 changelog_lines = []
                 procedure_function_names = []
@@ -2019,8 +2080,6 @@ class ProductionEmbeddingFramework:
                 file_name=file_name,
                 api_name=api_name,
                 file_size_mb=file_path.stat().st_size / (1024 * 1024),
-                procedure_count=procedure_count,
-                function_count=function_count,
                 api_calls=api_calls,
                 changelog_lines=changelog_lines,
                 procedure_function_names=procedure_function_names,
@@ -2115,6 +2174,19 @@ class ProductionEmbeddingFramework:
     async def run_embedding_pipeline(self, resume: bool = True) -> Dict[str, Any]:
         """Run the complete embedding pipeline with separated AI summarization."""
         logger.info("Starting production embedding pipeline (2-phase approach)")
+        
+        # Pre-flight check: Ensure Ollama is running before starting
+        logger.info("🔍 Pre-flight check: Verifying Ollama availability...")
+        if not self.ollama_processor.check_ollama_availability():
+            error_msg = (
+                "❌ CRITICAL ERROR: Ollama is not available or not running!\n"
+                "Please ensure Ollama is installed and running before starting the embedding process.\n"
+                "You can start Ollama by running: ollama serve"
+            )
+            logger.error(error_msg)
+            raise RuntimeError("Ollama service is not available. Cannot proceed with embedding generation.")
+        
+        logger.info("✅ Pre-flight check passed: Ollama is running and available")
         
         # Archive existing checkpoint files if not resuming to avoid duplicates
         if not resume:
@@ -2254,6 +2326,9 @@ class ProductionEmbeddingFramework:
             # Create basic result with content hash and metadata (CPU only)
             content_hash = hashlib.sha256(content.encode()).hexdigest()
 
+            # Create content excerpt for BM25S indexing (CPU processing only)
+            content_excerpt = self._create_content_excerpt(content, file_metadata)
+            
             # Create a basic result for Phase 1 (no AI summary, no embeddings yet)
             basic_result = ProcessingResult(
                 file_metadata=file_metadata,
@@ -2262,11 +2337,8 @@ class ProductionEmbeddingFramework:
                 content_hash=content_hash,
                 summary=None,  # Will be filled in Phase 2A
                 embedding=None,  # Will be generated in Phase 2B
+                content_excerpt=content_excerpt,  # Phase 1 content excerpt
             )
-
-            # Create content excerpt for BM25S indexing (CPU processing only)
-            content_excerpt = self._create_content_excerpt(content, file_metadata)
-            # Store content excerpt for BM25S but keep summary as None for Phase 1
             
             # Save basic result and add to BM25S corpus (disk I/O only)
             self.checkpoint_manager.save_result(basic_result)
@@ -2390,8 +2462,8 @@ class ProductionEmbeddingFramework:
             # 4. Dependencies (10% weight) - What does it interact with?
             f"Dependencies: {len(metadata.api_calls)} API calls including {top_api_calls}",
             
-            # 5. Implementation Details (10% weight) - What's the scope?
-            f"Implementation: {metadata.procedure_count} procedures, {metadata.function_count} functions",
+            # 5. Implementation Details (10% weight) - From procedure/function names
+            f"Implementation: {len(metadata.procedure_function_names)} key procedures/functions",
         ]
         
         return " | ".join(structured_parts)
@@ -2543,10 +2615,21 @@ class ProductionEmbeddingFramework:
             
             logger.info(f"Phase 2B: Generating embeddings for {len(all_results_with_summaries)} AI summaries...")
             
+            # Debug: Count results with AI summaries
+            with_summaries = sum(1 for r in all_results_with_summaries if r.has_ai_summary)
+            with_embeddings = sum(1 for r in all_results_with_summaries if r.embedding is not None)
+            logger.info(f"🔍 Debug: {with_summaries} results have AI summaries, {with_embeddings} already have embeddings")
+            
             for idx, result in enumerate(all_results_with_summaries):
                 # Skip if no AI summary or already has embedding
                 if not result.has_ai_summary or result.embedding is not None:
+                    if not result.has_ai_summary:
+                        logger.debug(f"Skipping {result.file_metadata.file_name}: No AI summary")
+                    else:
+                        logger.debug(f"Skipping {result.file_metadata.file_name}: Already has embedding")
                     continue
+                    
+                logger.info(f"📝 Processing embedding for: {result.file_metadata.file_name}")
                     
                 # Find the file metadata
                 file_metadata = None
@@ -2556,16 +2639,19 @@ class ProductionEmbeddingFramework:
                         break
                         
                 if not file_metadata:
+                    logger.warning(f"⚠️ Could not find file metadata for {result.file_metadata.file_path}")
                     continue
                     
                 # Create structured embedding text combining AI summary with metadata
                 embedding_text = self._create_developer_focused_embedding_text(
                     result.summary, file_metadata
                 )
+                logger.info(f"🚀 About to generate embedding for {file_metadata.file_name} (text length: {len(embedding_text)})")
                 logger.debug(f"Phase 2B: Generating embedding for {file_metadata.file_name}")
                 embedding = self.embedding_generator.generate_embedding(embedding_text)
                 
                 if embedding:
+                    logger.info(f"✅ Successfully generated embedding for {file_metadata.file_name} ({len(embedding)} dimensions)")
                     result.embedding = embedding
                     embedding_count += 1
                     
@@ -2584,6 +2670,8 @@ class ProductionEmbeddingFramework:
                     
                     # Save updated result with embedding to Phase 2B file
                     self.checkpoint_manager.save_phase2b_result(result)
+                else:
+                    logger.error(f"❌ Failed to generate embedding for {file_metadata.file_name}")
                     
                     # Progress reporting
                     if (embedding_count % 10) == 0:

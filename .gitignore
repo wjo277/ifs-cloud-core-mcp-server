@@ -102,6 +102,7 @@ models/
 
 # Cache
 *cache*/
+embedding_checkpoints/
 
 # Demo
 demo*/
