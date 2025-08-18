@@ -25,7 +25,7 @@ import sys
 import time
 import re
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any, Tuple
@@ -56,49 +56,26 @@ class BuiltInPageRankAnalyzer:
         self.work_dir = Path(work_dir)
         self.max_context_tokens = max_context_tokens
 
-        # Regex patterns for PL/SQL analysis
-        self.api_call_patterns = [
-            re.compile(r"([A-Z][a-z]+(?:[A-Z][a-z]*)*_API)\.", re.IGNORECASE),
-            re.compile(r"PROCEDURE\s+([A-Z][a-z_]+)", re.IGNORECASE),
-            re.compile(r"FUNCTION\s+([A-Z][a-z_]+)", re.IGNORECASE),
-        ]
-
-        self.error_message_pattern = re.compile(
-            r'Error_SYS\.(?:Record_General|Appl_General)\s*\(\s*[\'"]([^\'"]+)[\'"]',
-            re.IGNORECASE | re.MULTILINE,
-        )
-
-        self.comment_pattern = re.compile(r"--.*$", re.MULTILINE)
-
     def extract_file_info(self, file_path: Path) -> Dict[str, Any]:
-        """Extract metadata and references from a PL/SQL file."""
+        """Extract API calls from a PL/SQL file (fast and simple)."""
         try:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
 
-            # Extract API calls
+            # Simple regex to find all Package_Name_API calls
+            api_call_pattern = re.compile(r"([A-Z][A-Z0-9_]*_API)\.", re.IGNORECASE)
             api_calls = set()
-            for pattern in self.api_call_patterns:
-                matches = pattern.findall(content)
-                api_calls.update(
-                    match.upper() if isinstance(match, str) else match[0].upper()
-                    for match in matches
-                )
 
-            # Count procedures and functions
-            procedure_count = len(re.findall(r"\bPROCEDURE\s+", content, re.IGNORECASE))
-            function_count = len(re.findall(r"\bFUNCTION\s+", content, re.IGNORECASE))
+            # Find all API calls in the content
+            matches = api_call_pattern.findall(content)
+            # API calls are already correctly formatted, just add them
+            api_calls.update(match.upper() for match in matches)
 
-            # Extract error messages
-            error_messages = self.error_message_pattern.findall(content)
-
-            # Count comments
-            comments = self.comment_pattern.findall(content)
-
-            # Determine API name from file path
+            # Determine this file's API name from file path
             file_name = file_path.name
-            api_name = file_name.replace(".plsql", "") + "_API"
-            if not api_name.endswith("_API"):
-                api_name = api_name.replace("_API", "") + "_API"
+            if file_name.endswith(".plsql"):
+                api_name = file_name[:-6].upper() + "_API"  # Remove .plsql extension
+            else:
+                api_name = file_path.stem.upper() + "_API"
 
             return {
                 "file_path": str(file_path),
@@ -106,11 +83,7 @@ class BuiltInPageRankAnalyzer:
                 "file_name": file_name,
                 "api_name": api_name,
                 "file_size_mb": file_path.stat().st_size / (1024 * 1024),
-                "procedure_count": procedure_count,
-                "function_count": function_count,
-                "error_message_count": len(error_messages),
-                "comment_count": len(comments),
-                "api_calls": list(api_calls),
+                "api_calls": list(api_calls),  # Who this file calls
             }
 
         except Exception as e:
@@ -143,49 +116,6 @@ class BuiltInPageRankAnalyzer:
 
         return reference_graph
 
-    def calculate_pagerank(
-        self,
-        reference_graph: Dict[str, Set[str]],
-        damping: float = 0.85,
-        max_iterations: int = 100,
-        tolerance: float = 1e-6,
-    ) -> Dict[str, float]:
-        """Calculate PageRank scores for files."""
-        files = list(reference_graph.keys())
-        n = len(files)
-
-        if n == 0:
-            return {}
-
-        # Initialize PageRank scores
-        pagerank = {file: 1.0 / n for file in files}
-
-        for iteration in range(max_iterations):
-            new_pagerank = {}
-
-            for file in files:
-                # Base score from damping
-                new_score = (1 - damping) / n
-
-                # Add contributions from referencing files
-                for other_file in files:
-                    if file in reference_graph[other_file]:
-                        out_links = len(reference_graph[other_file])
-                        if out_links > 0:
-                            new_score += damping * pagerank[other_file] / out_links
-
-                new_pagerank[file] = new_score
-
-            # Check convergence
-            diff = sum(abs(new_pagerank[file] - pagerank[file]) for file in files)
-            if diff < tolerance:
-                logger.info(f"PageRank converged after {iteration + 1} iterations")
-                break
-
-            pagerank = new_pagerank
-
-        return pagerank
-
     def analyze_files(self) -> Dict[str, Any]:
         """Perform complete PageRank analysis of PL/SQL files."""
         logger.info("🔍 Starting built-in PageRank analysis...")
@@ -214,51 +144,22 @@ class BuiltInPageRankAnalyzer:
         logger.info("🔗 Building reference graph...")
         reference_graph = self.build_reference_graph(files_info)
 
-        # Calculate PageRank
-        logger.info("⚡ Calculating PageRank scores...")
-        pagerank_scores = self.calculate_pagerank(reference_graph)
-
-        # Create reverse reference count (who calls this file)
-        reference_counts = {}
-        for file_path in reference_graph:
-            reference_counts[file_path] = 0
-
-        for file_path, references in reference_graph.items():
-            for referenced_file in references:
-                reference_counts[referenced_file] += 1
-
-        # Combine all data and calculate importance scores
+        # Simplified ranking - just sort alphabetically by file path for consistency
         file_rankings = []
         for info in files_info:
             if not info:
                 continue
 
-            file_path = info["file_path"]
-            pagerank_score = pagerank_scores.get(file_path, 0)
-            reference_count = reference_counts.get(file_path, 0)
+            file_rankings.append(info)
 
-            # Combined importance score
-            importance_score = pagerank_score * 10000 + reference_count * 0.8
-
-            file_rankings.append(
-                {
-                    **info,
-                    "pagerank_score": pagerank_score,
-                    "reference_count": reference_count,
-                    "combined_importance_score": importance_score,
-                    "calls_count": len(info["api_calls"]),
-                    "called_by_count": reference_count,
-                }
-            )
-
-        # Sort by importance score
-        file_rankings.sort(key=lambda x: x["combined_importance_score"], reverse=True)
+        # Sort by file path for consistent ordering
+        file_rankings.sort(key=lambda x: x["file_path"])
 
         # Add rank numbers
         for i, ranking in enumerate(file_rankings):
             ranking["rank"] = i + 1
 
-        # Prepare final analysis
+        # Prepare final analysis (simplified)
         analysis_metadata = {
             "work_directory": str(self.work_dir),
             "max_context_tokens": self.max_context_tokens,
@@ -266,18 +167,7 @@ class BuiltInPageRankAnalyzer:
             "processing_stats": {
                 "total_files_found": len(plsql_files),
                 "total_files_processed": len(files_info),
-                "total_procedures_found": sum(
-                    info["procedure_count"] for info in files_info
-                ),
-                "total_functions_found": sum(
-                    info["function_count"] for info in files_info
-                ),
-                "total_error_messages_found": sum(
-                    info["error_message_count"] for info in files_info
-                ),
-                "total_comments_found": sum(
-                    info["comment_count"] for info in files_info
-                ),
+                "total_api_calls_found": sum(len(info["api_calls"]) for info in files_info),
             },
         }
 
@@ -293,16 +183,12 @@ class FileMetadata:
     relative_path: str
     file_name: str
     api_name: str
-    combined_importance_score: float
-    pagerank_score: float
-    reference_count: int
     file_size_mb: float
     procedure_count: int
     function_count: int
-    error_message_count: int
-    comment_count: int
-    called_by_count: int
-    calls_count: int
+    api_calls: List[str] = field(default_factory=list)
+    changelog_lines: List[str] = field(default_factory=list)
+    procedure_function_names: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -318,6 +204,7 @@ class ProcessingResult:
     bm25_text: Optional[str] = None  # Text used for BM25S indexing
     error_message: Optional[str] = None
     tokens_used: Optional[int] = None
+    has_ai_summary: bool = False  # True if summary is AI-generated, False if just content excerpt
 
 
 @dataclass
@@ -336,17 +223,17 @@ class ProcessingProgress:
     checkpoint_saved: bool
 
 
-class UniXCoderEmbeddingGenerator:
-    """Generates code embeddings using UniXCoder for semantic search."""
+class BGEM3EmbeddingGenerator:
+    """Generates embeddings using BGE-M3 for semantic search of business content."""
 
-    def __init__(self, model_name: str = "microsoft/unixcoder-base"):
+    def __init__(self, model_name: str = "BAAI/bge-m3"):
         self.model_name = model_name
         self.model = None
         self.tokenizer = None
         self.device = None
 
     def initialize_model(self) -> bool:
-        """Initialize the UniXCoder model for embedding generation."""
+        """Initialize the BGE-M3 model for embedding generation."""
         if not SEARCH_DEPENDENCIES_AVAILABLE:
             logger.warning("Embedding dependencies not available")
             return False
@@ -356,40 +243,40 @@ class UniXCoderEmbeddingGenerator:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             logger.info(f"Using device: {self.device}")
 
-            # Load UniXCoder tokenizer and model
-            logger.info(f"Loading UniXCoder model: {self.model_name}")
+            # Load BGE-M3 tokenizer and model
+            logger.info(f"Loading BGE-M3 model: {self.model_name}")
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self.model = AutoModel.from_pretrained(self.model_name)
             self.model.to(self.device)
             self.model.eval()  # Set to evaluation mode
 
-            logger.info("✅ UniXCoder model loaded successfully")
+            logger.info("✅ BGE-M3 model loaded successfully")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to initialize UniXCoder model: {e}")
+            logger.error(f"Failed to initialize BGE-M3 model: {e}")
             return False
 
     def generate_embedding(self, text: str) -> Optional[List[float]]:
-        """Generate embedding vector for the given text using UniXCoder."""
+        """Generate embedding vector for the given text using BGE-M3."""
         if not self.model or not self.tokenizer:
-            logger.warning("UniXCoder model not initialized")
+            logger.warning("BGE-M3 model not initialized")
             return None
 
         try:
-            # Tokenize input
+            # Tokenize input with BGE-M3's 8192 token limit
             inputs = self.tokenizer(
                 text,
                 return_tensors="pt",
                 padding=True,
                 truncation=True,
-                max_length=512,  # UniXCoder's max length
+                max_length=8192,  # BGE-M3's max length
             ).to(self.device)
 
             # Generate embeddings
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                # Use CLS token embedding (first token)
+                # Use CLS token embedding (first token) for BGE-M3
                 embedding = outputs.last_hidden_state[:, 0, :].squeeze()
 
             # Convert to CPU numpy array then to list
@@ -404,14 +291,14 @@ class UniXCoderEmbeddingGenerator:
     def get_embedding_dimension(self) -> int:
         """Get the dimension of embeddings produced by this model."""
         if not self.model:
-            return 768  # Default UniXCoder dimension
+            return 1024  # Default BGE-M3 dimension
         return self.model.config.hidden_size
 
 
 class FAISSIndexManager:
     """Manages FAISS index creation and persistence for embeddings."""
 
-    def __init__(self, index_dir: Path, embedding_dim: int = 768):
+    def __init__(self, index_dir: Path, embedding_dim: int = 1024):
         self.index_dir = index_dir
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
@@ -445,8 +332,32 @@ class FAISSIndexManager:
                 f"Building FAISS index with {len(self.embeddings)} embeddings..."
             )
 
+            # Filter out None/invalid embeddings and check dimensions
+            valid_embeddings = []
+            for i, emb in enumerate(self.embeddings):
+                if emb is not None and isinstance(emb, list) and len(emb) > 0:
+                    valid_embeddings.append(emb)
+                else:
+                    logger.warning(f"Skipping invalid embedding at index {i}: {type(emb)}")
+
+            if not valid_embeddings:
+                logger.warning("No valid embeddings to index")
+                return False
+
+            # Check if all embeddings have the same dimension
+            emb_dims = [len(emb) for emb in valid_embeddings]
+            unique_dims = set(emb_dims)
+            if len(unique_dims) > 1:
+                logger.warning(f"Inconsistent embedding dimensions: {unique_dims}")
+                # Use the most common dimension
+                from collections import Counter
+                most_common_dim = Counter(emb_dims).most_common(1)[0][0]
+                logger.info(f"Using dimension {most_common_dim} for FAISS index")
+                valid_embeddings = [emb for emb in valid_embeddings if len(emb) == most_common_dim]
+                self.embedding_dim = most_common_dim
+
             # Convert embeddings to numpy array
-            embeddings_np = np.array(self.embeddings, dtype=np.float32)
+            embeddings_np = np.array(valid_embeddings, dtype=np.float32)
 
             # Create FAISS index (using IndexFlatIP for cosine similarity)
             self.faiss_index = faiss.IndexFlatIP(self.embedding_dim)
@@ -464,16 +375,16 @@ class FAISSIndexManager:
             # Save metadata
             metadata = {
                 "created_at": datetime.now().isoformat(),
-                "embedding_count": len(self.embeddings),
+                "embedding_count": len(valid_embeddings),
                 "embedding_dimension": self.embedding_dim,
                 "index_type": "FAISS_IndexFlatIP",
-                "model": "microsoft/unixcoder-base",
+                "model": "BAAI/bge-m3",
             }
             with open(self.metadata_file, "w") as f:
                 json.dump(metadata, f, indent=2)
 
             logger.info(
-                f"✅ FAISS index built successfully: {len(self.embeddings)} embeddings"
+                f"✅ FAISS index built successfully: {len(valid_embeddings)} embeddings"
             )
             return True
 
@@ -538,12 +449,9 @@ class BM25SIndexer:
             f"api:{metadata.api_name}",
             # Ranking context (for query-document alignment)
             f"rank:{metadata.rank}",
-            f"importance:{metadata.combined_importance_score:.1f}",
-            f"references:{metadata.reference_count}",
             # Code structure (for technical queries)
             f"procedures:{metadata.procedure_count}",
             f"functions:{metadata.function_count}",
-            f"errors:{metadata.error_message_count}",
             # Rich content (for semantic-lexical bridge)
             summary or "",
         ]
@@ -565,8 +473,6 @@ class BM25SIndexer:
                 "file_name": result.file_metadata.file_name,
                 "api_name": result.file_metadata.api_name,
                 "rank": result.file_metadata.rank,
-                "importance_score": result.file_metadata.combined_importance_score,
-                "reference_count": result.file_metadata.reference_count,
                 "content_hash": result.content_hash,
             }
         )
@@ -662,6 +568,39 @@ class EmbeddingCheckpointManager:
         self.results_file = checkpoint_dir / "results.jsonl"
         self.metadata_file = checkpoint_dir / "metadata.json"
 
+    def archive_existing_files(self) -> None:
+        """Archive existing checkpoint files before starting a new run to avoid duplicates."""
+        import time
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        
+        files_to_archive = [
+            self.results_file,
+            self.checkpoint_dir / "phase2a_results.jsonl",
+            self.checkpoint_dir / "phase2b_results.jsonl",
+            self.progress_file,
+            self.metadata_file
+        ]
+        
+        archived_any = False
+        for file_path in files_to_archive:
+            if file_path.exists():
+                # Create archive filename with timestamp
+                archive_name = f"{file_path.stem}_{timestamp}{file_path.suffix}"
+                archive_path = self.checkpoint_dir / "archives" / archive_name
+                
+                # Create archives directory if it doesn't exist
+                archive_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Move the existing file to archive
+                file_path.rename(archive_path)
+                logger.info(f"📁 Archived {file_path.name} → {archive_name}")
+                archived_any = True
+        
+        if archived_any:
+            logger.info(f"✅ Existing checkpoint files archived with timestamp {timestamp}")
+        else:
+            logger.info("📝 No existing checkpoint files to archive - starting fresh")
+
     def save_progress(self, progress: ProcessingProgress) -> None:
         """Save current progress to checkpoint."""
         progress_data = asdict(progress)
@@ -702,6 +641,26 @@ class EmbeddingCheckpointManager:
         with open(self.results_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(result_data) + "\n")
 
+    def save_phase2a_result(self, result: ProcessingResult) -> None:
+        """Append Phase 2A AI summary result to separate results file."""
+        result_data = asdict(result)
+        result_data["timestamp"] = datetime.now().isoformat()
+
+        # Create phase2a_results.jsonl file
+        phase2a_results_file = self.checkpoint_dir / "phase2a_results.jsonl"
+        with open(phase2a_results_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(result_data) + "\n")
+
+    def save_phase2b_result(self, result: ProcessingResult) -> None:
+        """Append Phase 2B embedding result to separate results file."""
+        result_data = asdict(result)
+        result_data["timestamp"] = datetime.now().isoformat()
+
+        # Create phase2b_results.jsonl file
+        phase2b_results_file = self.checkpoint_dir / "phase2b_results.jsonl"
+        with open(phase2b_results_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(result_data) + "\n")
+
     def load_processed_files(self) -> Set[str]:
         """Load set of already processed files."""
         processed = set()
@@ -729,17 +688,38 @@ class EmbeddingCheckpointManager:
                     for line in f:
                         if line.strip():
                             result_data = json.loads(line)
-                            # Convert back to ProcessingResult
-                            result = ProcessingResult(
-                                file_path=result_data["file_path"],
-                                success=result_data["success"],
-                                content_hash=result_data["content_hash"],
-                                summary=result_data.get("summary", ""),
-                                error_message=result_data.get("error_message", ""),
-                                processing_time=result_data.get("processing_time", 0.0),
-                                token_count=result_data.get("token_count", 0),
-                                embedding=result_data.get("embedding"),
-                            )
+                            
+                            # Handle both old and new checkpoint formats
+                            if "file_metadata" in result_data:
+                                # New format with FileMetadata object
+                                file_metadata_data = result_data["file_metadata"]
+                                file_metadata = FileMetadata(
+                                    rank=file_metadata_data["rank"],
+                                    file_path=file_metadata_data["file_path"],
+                                    relative_path=file_metadata_data["relative_path"],
+                                    file_name=file_metadata_data["file_name"],
+                                    api_name=file_metadata_data["api_name"],
+                                    file_size_mb=file_metadata_data["file_size_mb"],
+                                    procedure_count=file_metadata_data.get("procedure_count", 0),
+                                    function_count=file_metadata_data.get("function_count", 0),
+                                    api_calls=file_metadata_data.get("api_calls", []),
+                                    changelog_lines=file_metadata_data.get("changelog_lines", []),
+                                    procedure_function_names=file_metadata_data.get("procedure_function_names", []),
+                                )
+                                
+                                result = ProcessingResult(
+                                    file_metadata=file_metadata,
+                                    success=result_data["success"],
+                                    processing_time=result_data.get("processing_time", 0.0),
+                                    content_hash=result_data["content_hash"],
+                                    summary=result_data.get("summary", ""),
+                                    embedding=result_data.get("embedding"),
+                                    has_ai_summary=result_data.get("has_ai_summary", False),  # Default to False for backward compatibility
+                                )
+                            else:
+                                # Old format - skip for now as we're using new format
+                                continue
+                                
                             results.append(result)
             except Exception as e:
                 logger.warning(f"Failed to load all results: {e}")
@@ -760,6 +740,8 @@ class OllamaProcessor:
         self.model = model
         self.max_tokens = max_tokens
         self.context_limit = 64000  # Leave some buffer for response
+        self.restart_count = 0  # Track Ollama restart attempts
+        self.max_restarts = 3  # Maximum number of restart attempts
 
     def check_ollama_availability(self) -> bool:
         """Check if Ollama is available and model is pulled."""
@@ -919,10 +901,6 @@ class OllamaProcessor:
         }
 
         # Adjust priorities based on file metadata
-        if metadata.error_message_count > 10:
-            signal_priorities["error_messages"] = 0.35  # Increase if many errors
-            signal_priorities["procedures"] = 0.25
-
         if metadata.procedure_count > metadata.function_count * 2:
             signal_priorities["procedures"] = 0.35  # File is procedure-heavy
             signal_priorities["functions"] = 0.20
@@ -981,17 +959,34 @@ class OllamaProcessor:
 
     def create_summary_prompt(self, content: str, metadata: FileMetadata) -> str:
         """Create optimized prompt for file summarization using balanced signals."""
+        
+        # Format changelog lines if available
+        changelog_section = ""
+        if metadata.changelog_lines:
+            changelog_text = "\n".join(metadata.changelog_lines)
+            changelog_section = f"""
+FILE CHANGELOG (SELECTED HEADER COMMENTS):
+{changelog_text}
+"""
+        
+        # Format procedure/function names if available
+        procedures_section = ""
+        if metadata.procedure_function_names:
+            procedures_text = "\n".join(metadata.procedure_function_names)
+            procedures_section = f"""
+KEY PROCEDURES/FUNCTIONS (EVENLY SAMPLED):
+{procedures_text}
+"""
+
         return f"""Analyze this IFS Cloud PL/SQL file using the provided signals and create a comprehensive summary for semantic search purposes.
 
 FILE METADATA & CONTEXT:
 - File: {metadata.file_name}
 - API: {metadata.api_name}  
-- PageRank Importance: {metadata.combined_importance_score:.2f} (Rank #{metadata.rank} of 9,750)
-- System Integration: Referenced by {metadata.reference_count} other files
+- Rank: #{metadata.rank}
 - Code Structure: {metadata.procedure_count} procedures, {metadata.function_count} functions
-- Error Handling: {metadata.error_message_count} error scenarios
-- Calls Other APIs: {metadata.calls_count} external dependencies
-
+- API Calls: {len(metadata.api_calls)} external dependencies
+{changelog_section}{procedures_section}
 EXTRACTED SIGNALS (BALANCED FOR SEMANTIC ANALYSIS):
 {content}
 
@@ -1000,7 +995,7 @@ Create a detailed summary optimized for semantic search and system understanding
 
 1. **PRIMARY BUSINESS PURPOSE**: What core business function does this API serve in IFS Cloud?
 
-2. **SYSTEM IMPORTANCE**: Why is this file ranked #{metadata.rank}? What makes it critical to {metadata.reference_count} other components?
+2. **SYSTEM IMPORTANCE**: Why is this file ranked #{metadata.rank}? What makes it architecturally important?
 
 3. **KEY FUNCTIONALITY**: Based on the procedures/functions, what are the 3-5 most important operations this API provides?
 
@@ -1014,8 +1009,111 @@ Create a detailed summary optimized for semantic search and system understanding
 
 8. **TECHNICAL ARCHITECTURE**: Any notable patterns, complexity, or architectural considerations?
 
+9. **CHANGE HISTORY**: If changelog information is available, what major changes or evolution patterns are evident?
+
 Focus on business value, system relationships, and searchable concepts rather than implementation details. This summary will be used for semantic similarity matching to help users find relevant code components.
 """
+
+    def is_ollama_crashed_response(self, output: str) -> bool:
+        """Detect if Ollama output indicates a crashed/corrupted state."""
+        if not output:
+            return False
+            
+        # Check for the specific "@" crash pattern
+        stripped = output.strip()
+        if len(stripped) > 20 and all(c == '@' for c in stripped):
+            logger.warning(f"Detected Ollama crash pattern: {len(stripped)} '@' characters")
+            return True
+            
+        # Check for other crash patterns
+        crash_indicators = [
+            "model not found",
+            "connection refused",
+            "server error",
+            "internal error"
+        ]
+        
+        lower_output = output.lower()
+        for indicator in crash_indicators:
+            if indicator in lower_output:
+                return True
+                
+        return False
+
+    def restart_ollama(self) -> bool:
+        """Restart Ollama server to recover from crashes."""
+        # Check if we've exceeded restart limit
+        if self.restart_count >= self.max_restarts:
+            logger.error(f"❌ Ollama restart limit exceeded ({self.max_restarts} attempts). "
+                        f"The Ollama service appears to be in a persistently corrupted state.")
+            return False
+            
+        self.restart_count += 1
+        
+        try:
+            logger.warning(f"🔄 Restarting Ollama server (attempt {self.restart_count}/{self.max_restarts}) due to crash detection...")
+            
+            # Kill any existing Ollama processes
+            logger.info("Terminating existing Ollama processes...")
+            subprocess.run(
+                ["taskkill", "/f", "/im", "ollama.exe"],
+                capture_output=True,
+                timeout=30
+            )
+            
+            # Wait a moment for processes to terminate
+            time.sleep(2)
+            
+            # Start Ollama server and ensure model is loaded
+            logger.info(f"Restarting Ollama and loading model {self.model}...")
+            subprocess.run(
+                ["ollama", "run", self.model, "Ready to process files."],
+                capture_output=True,
+                timeout=120  # Allow time for model loading
+            )
+            
+            logger.info("✅ Ollama server restarted successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to restart Ollama: {e}")
+            return False
+
+    def reset_restart_counter(self):
+        """Reset the restart counter after successful processing."""
+        if self.restart_count > 0:
+            logger.debug(f"Resetting Ollama restart counter (was {self.restart_count})")
+            self.restart_count = 0
+
+    def shutdown_ollama(self) -> bool:
+        """Shutdown Ollama server to free VRAM for other models."""
+        try:
+            logger.info("🔄 Shutting down Ollama server to free VRAM...")
+            
+            # Kill all Ollama processes to free VRAM
+            result = subprocess.run(
+                ["taskkill", "/f", "/im", "ollama.exe"],
+                capture_output=True,
+                timeout=30
+            )
+            
+            # Also try to stop any ollama_llama_server processes
+            subprocess.run(
+                ["taskkill", "/f", "/im", "ollama_llama_server.exe"],
+                capture_output=True,
+                timeout=30
+            )
+            
+            # Wait a moment for processes to fully terminate and VRAM to be freed
+            time.sleep(3)
+            
+            logger.info("✅ Ollama server shutdown complete - VRAM freed for next phase")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Error during Ollama shutdown (non-critical): {e}")
+            # Don't fail the entire process if shutdown has issues
+            return False
 
     def process_file(self, content: str, metadata: FileMetadata) -> ProcessingResult:
         """Process a single file with AI summarization."""
@@ -1042,7 +1140,88 @@ Focus on business value, system relationships, and searchable concepts rather th
 
             processing_time = time.time() - start_time
 
+            # Check for crash/corruption patterns
+            if result.returncode == 0 and result.stdout:
+                # Check if output indicates Ollama crashed
+                if self.is_ollama_crashed_response(result.stdout):
+                    logger.warning(f"Ollama crash detected for {metadata.file_name}")
+                    
+                    # Attempt to restart Ollama
+                    if self.restart_ollama():
+                        # Retry the file processing
+                        logger.info(f"Retrying processing of {metadata.file_name} after Ollama restart")
+                        retry_start = time.time()
+                        
+                        retry_result = subprocess.run(
+                            ["ollama", "run", self.model],
+                            input=prompt,
+                            text=True,
+                            capture_output=True,
+                            timeout=300,
+                        )
+                        
+                        processing_time = time.time() - retry_start
+                        
+                        if retry_result.returncode == 0 and retry_result.stdout:
+                            if not self.is_ollama_crashed_response(retry_result.stdout):
+                                result = retry_result  # Use successful retry result
+                                # Reset restart counter on successful retry
+                                self.reset_restart_counter()
+                                logger.info(f"✅ Successfully processed {metadata.file_name} after Ollama restart")
+                            else:
+                                # Check if this is due to restart limit being exceeded
+                                if self.restart_count >= self.max_restarts:
+                                    error_summary = (f"Failed: Ollama service is in a persistently corrupted state. "
+                                                   f"Exceeded maximum restart attempts ({self.max_restarts}). "
+                                                   f"Manual intervention required - try restarting your computer or "
+                                                   f"reinstalling Ollama.")
+                                else:
+                                    error_summary = "Failed: Ollama crashed multiple times"
+                                    
+                                logger.error(f"Ollama still crashed after restart for {metadata.file_name}")
+                                return ProcessingResult(
+                                    summary=error_summary,
+                                    metadata=asdict(metadata),
+                                    hash=content_hash,
+                                    processing_time=processing_time,
+                                    tokens_used=tokens_used,
+                                    success=False
+                                )
+                        else:
+                            logger.error(f"Retry failed for {metadata.file_name}: {retry_result.stderr}")
+                            return ProcessingResult(
+                                summary="Failed: Retry unsuccessful after Ollama restart",
+                                metadata=asdict(metadata),
+                                hash=content_hash,
+                                processing_time=processing_time,
+                                tokens_used=tokens_used,
+                                success=False
+                            )
+                    else:
+                        # Provide descriptive error based on why restart failed
+                        if self.restart_count >= self.max_restarts:
+                            error_summary = (f"Failed: Ollama service is in a persistently corrupted state. "
+                                           f"Exceeded maximum restart attempts ({self.max_restarts}). "
+                                           f"Manual intervention required - try restarting your computer or "
+                                           f"reinstalling Ollama.")
+                            logger.error(f"Ollama restart limit exceeded for {metadata.file_name}")
+                        else:
+                            error_summary = "Failed: Could not restart Ollama service"
+                            logger.error(f"Failed to restart Ollama for {metadata.file_name}")
+                            
+                        return ProcessingResult(
+                            summary=error_summary,
+                            metadata=asdict(metadata),
+                            hash=content_hash,
+                            processing_time=processing_time,
+                            tokens_used=tokens_used,
+                            success=False
+                        )
+
             if result.returncode == 0 and result.stdout.strip():
+                # Reset restart counter on successful processing
+                self.reset_restart_counter()
+                
                 return ProcessingResult(
                     file_metadata=metadata,
                     success=True,
@@ -1093,10 +1272,10 @@ class ProductionEmbeddingFramework:
         self.checkpoint_manager = EmbeddingCheckpointManager(self.checkpoint_dir)
         self.ollama_processor = OllamaProcessor(model)
         self.bm25_indexer = BM25SIndexer(self.checkpoint_dir / "search_indexes")
-        self.embedding_generator = UniXCoderEmbeddingGenerator()
+        self.embedding_generator = BGEM3EmbeddingGenerator()
         self.faiss_manager = FAISSIndexManager(
             self.checkpoint_dir / "search_indexes",
-            embedding_dim=768,  # UniXCoder default dimension
+            embedding_dim=1024,  # BGE-M3 default dimension
         )
 
         # Initialize built-in analyzer
@@ -1104,6 +1283,293 @@ class ProductionEmbeddingFramework:
 
         # Load or generate analysis data
         self.file_rankings = self._load_or_generate_analysis_data()
+
+    def _fix_api_naming(self, api_name: str) -> str:
+        """Fix API naming convention: add underscores before capitals except first and 'PI' in '_API'."""
+        if not api_name or api_name == "":
+            return api_name
+        
+        # Handle special case for _API suffix
+        if api_name.upper().endswith("_API"):
+            base_name = api_name[:-4]  # Remove _API
+            suffix = "_API"
+        elif api_name.upper().endswith("API"):
+            base_name = api_name[:-3]  # Remove API
+            suffix = "_API"
+        else:
+            base_name = api_name
+            suffix = ""
+        
+        # Add underscores before capitals (except first character)
+        fixed_name = ""
+        for i, char in enumerate(base_name):
+            if i > 0 and char.isupper():
+                fixed_name += "_" + char
+            else:
+                fixed_name += char
+        
+        return fixed_name.upper() + suffix
+
+    def _extract_changelog_lines(self, content: str) -> List[str]:
+        """Extract 10 changelog messages from header: first, last, and 8 evenly spaced between."""
+        try:
+            # Find actual changelog entries and extract just the messages
+            lines = content.split('\n')
+            changelog_messages = []
+            seen_messages = set()  # Track unique messages to avoid duplicates
+            
+            # Look for changelog entries that follow the pattern:
+            # --  DDMMYY   sign    description
+            # --  DD/MM/YYYY  sign    description  
+            for i, line in enumerate(lines[:100]):  # Check first 100 lines for changelog
+                stripped = line.strip()
+                
+                # Look for lines that contain actual changelog entries (dates + signatures + descriptions)
+                if stripped.startswith('--') and len(stripped) > 10:
+                    # Skip decorative lines (only dashes, headers, etc.)
+                    if all(c in '- ' for c in stripped[2:].strip()):
+                        continue
+                    if 'Date' in stripped and 'Sign' in stripped and 'History' in stripped:
+                        continue
+                    if stripped.endswith('-'):
+                        continue
+                    if 'Logical unit:' in stripped or 'Component:' in stripped:
+                        continue
+                    if 'Template Version' in stripped:
+                        continue
+                    if 'layer Core' in stripped:
+                        continue
+                        
+                    # Look for patterns that indicate actual changelog entries
+                    # Pattern 1: --  DDMMYY   name   description
+                    # Pattern 2: --  DD/MM/YYYY  name  description
+                    stripped_content = stripped[2:].strip()  # Remove '--' prefix
+                    
+                    # Check if it starts with a date-like pattern
+                    words = stripped_content.split()
+                    if len(words) >= 3:
+                        first_word = words[0]
+                        # Date patterns: DDMMYY (6 digits) or DD/MM/YYYY
+                        if (first_word.isdigit() and len(first_word) == 6) or \
+                           ('/' in first_word and len(first_word.split('/')) == 3):
+                            # Extract just the message part (skip date and developer name)
+                            # Typical format: date developer_name message...
+                            # Skip first two words (date and name) and take the rest
+                            if len(words) > 2:
+                                message = ' '.join(words[2:])  # Everything after date and name
+                                if message and len(message.strip()) > 3:  # Only meaningful messages
+                                    clean_message = message.strip()
+                                    # Only add if we haven't seen this exact message before
+                                    if clean_message.lower() not in seen_messages:
+                                        changelog_messages.append(clean_message)
+                                        seen_messages.add(clean_message.lower())
+                    
+            # If no changelog entries found, look for any meaningful comment lines with messages
+            if not changelog_messages:
+                for i, line in enumerate(lines[:50]):
+                    stripped = line.strip()
+                    if stripped.startswith('--') and len(stripped) > 15:
+                        # Skip pure decoration
+                        if all(c in '- ' for c in stripped[2:].strip()):
+                            continue
+                        if stripped.endswith('-' * 5):  # Lines ending with many dashes
+                            continue
+                        # Look for lines that seem to contain actual content descriptions
+                        content_part = stripped[2:].strip()
+                        if any(keyword in content_part.lower() for keyword in 
+                               ['added', 'created', 'updated', 'fixed', 'changed', 'removed', 'modified']):
+                            # Only add unique messages
+                            if content_part.lower() not in seen_messages:
+                                changelog_messages.append(content_part)
+                                seen_messages.add(content_part.lower())
+                        
+            # Select 10 messages: first, last, and 8 evenly spaced
+            if len(changelog_messages) <= 10:
+                return changelog_messages
+            elif len(changelog_messages) < 3:
+                return changelog_messages
+            else:
+                selected = [changelog_messages[0]]  # First
+                
+                # Calculate 8 evenly spaced indices between first and last
+                if len(changelog_messages) > 2:
+                    middle_count = min(8, len(changelog_messages) - 2)
+                    if middle_count > 0:
+                        step = (len(changelog_messages) - 2) / (middle_count + 1)
+                        for i in range(1, middle_count + 1):
+                            idx = int(1 + step * i)
+                            if idx < len(changelog_messages) - 1:
+                                selected.append(changelog_messages[idx])
+                
+                selected.append(changelog_messages[-1])  # Last
+                return selected[:10]
+                
+        except Exception as e:
+            logger.warning(f"Could not extract changelog lines: {e}")
+            return []
+
+    def _extract_procedure_function_names(self, content: str) -> List[str]:
+        """Extract 10 procedure/function names: balanced 50/50 public/private when available, excluding common IFS framework methods."""
+        try:
+            # Standard IFS framework method prefixes to exclude (these are generic implementation patterns)
+            excluded_prefixes = [
+                'GET_', 'SET_', 'CHECK_INSERT_', 'CHECK_UPDATE_', 'CHECK_DELETE_', 'CHECK_COMMON_',
+                'DO_INSERT_', 'DO_UPDATE_', 'DO_DELETE_', 'DO_MODIFY_', 'DO_REMOVE_',
+                'IS_', 'HAS_', 'EXIST_', 'EXISTS_', 'VALIDATE_', 'VERIFY_',
+                'UNPACK_', 'PACK_', 'PREPARE_', 'FINISH_', 'COMPLETE_',
+                'NEW__', 'MODIFY__', 'REMOVE__', 'DELETE__', 'INSERT__', 'UPDATE__',
+                'PRE_', 'POST_', 'BEFORE_', 'AFTER_',
+                'GET_OBJSTATE', 'GET_OBJVERSION', 'GET_OBJID', 'GET_STATE',
+                'FINITE_STATE_', 'SET_STATE_', 'GET_DB_VALUES_', 'GET_CLIENT_VALUES_',
+                'DECODE_', 'ENCODE_', 'GET_KEY_BY_', 'GET_KEYS_BY_'
+            ]
+            
+            # Additional exact method names to exclude (common framework methods)
+            excluded_exact = [
+                'GET_OBJKEY', 'GET_VERSION_BY_KEYS', 'GET_VERSION_BY_ID', 'EXIST',
+                'GET_FULL_NAME', 'GET_DESCRIPTION', 'GET_INFO', 'GET_BY_KEYS',
+                'LOCK__', 'NEW__', 'MODIFY__', 'REMOVE__', 'DELETE__'
+            ]
+            
+            # Separate collections for public and private methods
+            public_names = []  # Methods without underscores at the end
+            private_names = []  # Methods ending with ___
+            seen_names = set()  # Track unique names to avoid duplicates
+            
+            lines = content.split('\n')
+            
+            # Look for procedure and function declarations
+            for line in lines:
+                stripped = line.strip().upper()
+                
+                # Match PROCEDURE declarations
+                proc_match = re.match(r'^\s*PROCEDURE\s+(\w+)', stripped)
+                if proc_match:
+                    proc_name = proc_match.group(1)
+                    if proc_name.lower() not in seen_names:
+                        # Check if this should be excluded
+                        should_exclude = False
+                        
+                        # Check prefixes (excluding the __ or ___ suffix for comparison)
+                        base_name = proc_name.rstrip('_')
+                        for prefix in excluded_prefixes:
+                            if base_name.startswith(prefix):
+                                should_exclude = True
+                                break
+                        
+                        # Check exact matches (excluding suffix)
+                        if base_name in excluded_exact:
+                            should_exclude = True
+                        
+                        if not should_exclude:
+                            method_entry = f"PROCEDURE {proc_name}"
+                            if proc_name.endswith('___'):
+                                private_names.append(method_entry)
+                            else:
+                                public_names.append(method_entry)
+                            seen_names.add(proc_name.lower())
+                
+                # Match FUNCTION declarations  
+                func_match = re.match(r'^\s*FUNCTION\s+(\w+)', stripped)
+                if func_match:
+                    func_name = func_match.group(1)
+                    if func_name.lower() not in seen_names:
+                        # Check if this should be excluded
+                        should_exclude = False
+                        
+                        # Check prefixes (excluding the __ or ___ suffix for comparison)
+                        base_name = func_name.rstrip('_')
+                        for prefix in excluded_prefixes:
+                            if base_name.startswith(prefix):
+                                should_exclude = True
+                                break
+                        
+                        # Check exact matches (excluding suffix)
+                        if base_name in excluded_exact:
+                            should_exclude = True
+                        
+                        if not should_exclude:
+                            method_entry = f"FUNCTION {func_name}"
+                            if func_name.endswith('___'):
+                                private_names.append(method_entry)
+                            else:
+                                public_names.append(method_entry)
+                            seen_names.add(func_name.lower())
+            
+            # Balance between public and private methods (50/50 when both available)
+            total_needed = 10
+            
+            if len(public_names) == 0:
+                # Only private methods available
+                selected_names = private_names[:total_needed]
+            elif len(private_names) == 0:
+                # Only public methods available
+                selected_names = public_names[:total_needed]
+            else:
+                # Both types available - aim for 50/50 balance
+                public_needed = min(total_needed // 2, len(public_names))
+                private_needed = min(total_needed - public_needed, len(private_names))
+                
+                # If one category doesn't have enough, take more from the other
+                if private_needed < (total_needed - public_needed):
+                    public_needed = min(total_needed - private_needed, len(public_names))
+                elif public_needed < (total_needed - private_needed):
+                    private_needed = min(total_needed - public_needed, len(private_names))
+                
+                # Select evenly spaced methods from each category
+                selected_public = self._select_evenly_spaced(public_names, public_needed)
+                selected_private = self._select_evenly_spaced(private_names, private_needed)
+                
+                # Combine them, maintaining some alternation for better representation
+                selected_names = []
+                pub_idx = priv_idx = 0
+                for i in range(total_needed):
+                    if pub_idx < len(selected_public) and priv_idx < len(selected_private):
+                        # Alternate between public and private
+                        if i % 2 == 0:
+                            selected_names.append(selected_public[pub_idx])
+                            pub_idx += 1
+                        else:
+                            selected_names.append(selected_private[priv_idx])
+                            priv_idx += 1
+                    elif pub_idx < len(selected_public):
+                        selected_names.append(selected_public[pub_idx])
+                        pub_idx += 1
+                    elif priv_idx < len(selected_private):
+                        selected_names.append(selected_private[priv_idx])
+                        priv_idx += 1
+            
+            return selected_names[:total_needed]
+                
+        except Exception as e:
+            logger.warning(f"Could not extract procedure/function names: {e}")
+            return []
+
+    def _select_evenly_spaced(self, items: List[str], count: int) -> List[str]:
+        """Select evenly spaced items from a list."""
+        if not items or count <= 0:
+            return []
+        if count >= len(items):
+            return items
+        if len(items) < 3:
+            return items[:count]
+            
+        selected = [items[0]]  # First
+        
+        # Calculate evenly spaced indices between first and last
+        if len(items) > 2 and count > 2:
+            middle_count = min(count - 2, len(items) - 2)
+            if middle_count > 0:
+                step = (len(items) - 2) / (middle_count + 1)
+                for i in range(1, middle_count + 1):
+                    idx = int(1 + step * i)
+                    if idx < len(items) - 1:
+                        selected.append(items[idx])
+        
+        if count > 1 and len(items) > 1:
+            selected.append(items[-1])  # Last
+            
+        return selected[:count]
 
         logger.info(
             f"Initialized embedding framework with {len(self.file_rankings)} files"
@@ -1136,13 +1602,18 @@ class ProductionEmbeddingFramework:
             raise
 
     def _load_or_generate_analysis_data(self) -> List[FileMetadata]:
-        """Load existing analysis or generate new analysis if missing."""
+        """Load existing analysis or generate simplified analysis if missing."""
         # Try to load existing analysis first
         if self.analysis_file.exists():
             logger.info(f"📊 Loading existing analysis from {self.analysis_file}")
             return self._load_analysis_data()
 
-        # Generate new analysis
+        # For testing/development: Create a simplified file list without full PageRank analysis
+        if self.max_files and self.max_files <= 100:
+            logger.info(f"📊 Creating simplified file list for {self.max_files} files (skipping PageRank)")
+            return self._create_simplified_file_list()
+
+        # Full PageRank analysis only for production runs
         logger.info(f"📊 Analysis file not found, generating new PageRank analysis...")
         logger.info(f"   This may take a few minutes for {self.work_dir}...")
 
@@ -1167,12 +1638,80 @@ class ProductionEmbeddingFramework:
         logger.info(f"Generated analysis for {len(rankings)} files")
         return rankings
 
+    def _create_simplified_file_list(self) -> List[FileMetadata]:
+        """Create a simplified file list without PageRank analysis (for testing)."""
+        plsql_files = list(self.work_dir.rglob("*.plsql"))
+        rankings = []
+
+        for i, file_path in enumerate(plsql_files[:self.max_files]):
+            # Read content to extract actual metadata
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                
+                # Extract metadata using patterns similar to OllamaProcessor
+                procedure_count = len(re.findall(r'\bPROCEDURE\s+\w+', content, re.IGNORECASE))
+                function_count = len(re.findall(r'\bFUNCTION\s+\w+', content, re.IGNORECASE))
+                error_message_count = len(re.findall(r'\bError_SYS\.\w+|RAISE_APPLICATION_ERROR|EXCEPTION\b', content, re.IGNORECASE))
+                comment_count = len(re.findall(r'--.*$|/\*.*?\*/', content, re.MULTILINE | re.DOTALL))
+                
+                # Extract API calls - look for patterns like Package_API.method
+                api_call_pattern = r'\b([A-Z][A-Za-z_]*_API)\.([A-Za-z_]+)\s*\('
+                api_matches = re.findall(api_call_pattern, content)
+                # API calls are already correctly formatted, just combine them
+                api_calls = [f"{pkg}.{method}" for pkg, method in api_matches[:10]]  # Limit to top 10
+                
+                # Extract changelog lines from header
+                changelog_lines = self._extract_changelog_lines(content)
+                
+                # Extract procedure/function names
+                procedure_function_names = self._extract_procedure_function_names(content)
+                
+            except Exception as e:
+                logger.warning(f"Could not extract metadata from {file_path}: {e}")
+                procedure_count = function_count = error_message_count = comment_count = 0
+                api_calls = []
+                changelog_lines = []
+                procedure_function_names = []
+
+            # Create metadata with extracted counts and changelog
+            file_name = file_path.name
+            if file_name.endswith(".plsql"):
+                base_api_name = file_name[:-6] + "_API"  # Remove .plsql extension
+            else:
+                base_api_name = file_path.stem + "_API"
+            
+            api_name = self._fix_api_naming(base_api_name)
+            
+            metadata = FileMetadata(
+                file_path=str(file_path),
+                relative_path=str(file_path.relative_to(self.work_dir)),
+                file_name=file_name,
+                api_name=api_name,
+                file_size_mb=file_path.stat().st_size / (1024 * 1024),
+                procedure_count=procedure_count,
+                function_count=function_count,
+                api_calls=api_calls,
+                changelog_lines=changelog_lines,
+                procedure_function_names=procedure_function_names,
+                rank=i + 1
+            )
+            rankings.append(metadata)
+
+        logger.info(f"Created simplified file list with {len(rankings)} files")
+        return rankings
+
     def _read_file_content(self, file_path: str) -> Optional[str]:
         """Read file content safely."""
         try:
-            full_path = self.work_dir / file_path.replace("_work\\", "").replace(
-                "_work/", ""
-            )
+            # Handle both absolute and relative paths
+            if os.path.isabs(file_path):
+                full_path = Path(file_path)
+            else:
+                full_path = self.work_dir / file_path.replace("_work\\", "").replace(
+                    "_work/", ""
+                )
+            
             with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
                 return f.read()
         except Exception as e:
@@ -1246,31 +1785,91 @@ class ProductionEmbeddingFramework:
     async def run_embedding_pipeline(self, resume: bool = True) -> Dict[str, Any]:
         """Run the complete embedding pipeline with separated AI summarization."""
         logger.info("Starting production embedding pipeline (2-phase approach)")
+        
+        # Archive existing checkpoint files if not resuming to avoid duplicates
+        if not resume:
+            self.checkpoint_manager.archive_existing_files()
 
         # Phase 1: Basic processing and embeddings
         phase1_stats = await self._run_phase1_basic_processing(resume)
 
         # Phase 2: AI summarization pass
-        phase2_stats = await self._run_phase2_ai_summarization(resume)
+        phase2_stats = await self._run_phase2_ai_and_embeddings(resume)
 
-        # Combine stats
-        final_stats = {**phase1_stats, **phase2_stats, "pipeline_completed": True}
+        # Combine stats with compatibility keys
+        final_stats = {
+            **phase1_stats, 
+            **phase2_stats, 
+            "pipeline_completed": True,
+            # Compatibility keys for main function
+            "files_successful": phase1_stats.get("phase1_files_successful", 0) + phase2_stats.get("phase2_files_successful", 0),
+            "files_failed": phase1_stats.get("phase1_files_failed", 0) + phase2_stats.get("phase2_files_failed", 0),
+            "success_rate": (
+                (phase1_stats.get("phase1_files_successful", 0) + phase2_stats.get("phase2_files_successful", 0)) / 
+                max(1, phase1_stats.get("phase1_files_processed", 0) + phase2_stats.get("phase2_files_processed", 0))
+            ),
+            "average_rate": (
+                phase1_stats.get("phase1_average_rate", 0) + phase2_stats.get("phase2_average_rate", 0)
+            ) / 2,
+            "total_processing_time": phase1_stats.get("phase1_processing_time", 0) + phase2_stats.get("phase2_processing_time", 0),
+        }
 
         return final_stats
 
     async def _run_phase1_basic_processing(self, resume: bool = True) -> Dict[str, Any]:
         """Phase 1: Process files for basic embeddings and BM25S indexing without AI summaries."""
         logger.info("🚀 Phase 1: Basic processing and embeddings")
+        
+        # Print comprehensive explanation of Phase 1
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("📋 PHASE 1 EXPLANATION - WHAT WE'RE DOING AND WHY")
+        logger.info("=" * 80)
+        logger.info("")
+        logger.info("🎯 GOAL: Process all files for content indexing WITHOUT any GPU usage")
+        logger.info("   Pure CPU/disk operations to prepare files for Phase 2 AI processing")
+        logger.info("")
+        logger.info("🔄 STEP-BY-STEP PROCESS:")
+        logger.info("   1️⃣  For each of the 9,750 PL/SQL files:")
+        logger.info("       • Read raw file content (disk I/O only)")
+        logger.info("       • Create structured content excerpt (CPU processing)")
+        logger.info("       • Extract metadata (procedures, functions, comments)")
+        logger.info("       • Add to BM25S corpus (lexical/keyword search preparation)")
+        logger.info("       • Save checkpoint with basic result (disk I/O only)")
+        logger.info("   2️⃣  Build BM25S search index from all content excerpts (CPU only)")
+        logger.info("   3️⃣  Prepare file list for Phase 2 AI processing")
+        logger.info("")
+        logger.info("🖥️  HARDWARE USAGE:")
+        logger.info("   • CPU: Content processing, regex parsing, BM25S indexing")
+        logger.info("   • Disk: File reading, checkpoint saving, index writing")
+        logger.info("   • GPU: NONE - completely idle, no VRAM usage")
+        logger.info("   • Memory: Minimal - only text processing buffers")
+        logger.info("")
+        logger.info("📊 OUTPUTS FROM PHASE 1:")
+        logger.info("   • 9,750 content excerpts (keyword searchable)")
+        logger.info("   • 9,750 metadata records (file info, rankings)")
+        logger.info("   • BM25S index file (lexical search ready)")
+        logger.info("   • Checkpoint files (Phase 2 ready)")
+        logger.info("")
+        logger.info("⚡ WHY NO GPU IN PHASE 1:")
+        logger.info("   • Raw content is too large/noisy for good embeddings")
+        logger.info("   • AI summaries (Phase 2) are much better for embeddings")
+        logger.info("   • Keeps GPU completely free for intensive Phase 2 work")
+        logger.info("   • Avoids any VRAM allocation during file processing")
+        logger.info("")
+        logger.info("🔜 AFTER PHASE 1:")
+        logger.info("   • Phase 2 will load Ollama for AI summarization")
+        logger.info("   • Phase 2 will load BGE-M3 for embedding generation")
+        logger.info("   • Embeddings generated from clean AI summaries, not raw content")
+        logger.info("   • FAISS index built from high-quality AI summary embeddings")
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("🏁 STARTING PHASE 1 PROCESSING...")
+        logger.info("=" * 80)
+        logger.info("")
 
-        # Initialize UniXCoder model
-        logger.info("Initializing UniXCoder embedding model...")
-        if not self.embedding_generator.initialize_model():
-            logger.warning(
-                "UniXCoder model initialization failed - embeddings will be skipped"
-            )
-            embedding_available = False
-        else:
-            embedding_available = True
+        # Phase 1 is CPU/Disk only - no GPU model initialization
+        logger.info("💾 Phase 1: CPU and disk-based processing (no GPU usage)")
 
         # Load checkpoint if resuming
         processed_files = set()
@@ -1317,61 +1916,35 @@ class ProductionEmbeddingFramework:
                 failed_count += 1
                 continue
 
-            # Phase 1: Create basic result without AI summarization
+            # Phase 1: Create basic result with content excerpt (CPU only)
             logger.info(
                 f"Phase 1: Processing {file_metadata.file_name} (rank {file_metadata.rank})"
             )
 
-            # Create basic result with content hash and metadata
+            # Create basic result with content hash and metadata (CPU only)
             content_hash = hashlib.sha256(content.encode()).hexdigest()
 
-            # Create a basic result for Phase 1 (no AI summary yet)
+            # Create a basic result for Phase 1 (no AI summary, no embeddings yet)
             basic_result = ProcessingResult(
-                file_path=file_metadata.file_path,
+                file_metadata=file_metadata,
                 success=True,
-                content_hash=content_hash,
-                summary="",  # Will be filled in Phase 2
-                error_message="",
                 processing_time=0.0,
-                token_count=0,
-                embedding=None,
+                content_hash=content_hash,
+                summary=None,  # Will be filled in Phase 2A
+                embedding=None,  # Will be generated in Phase 2B
             )
 
-            # Generate UniXCoder embedding directly from raw content (not summary)
-            if embedding_available:
-                logger.debug(
-                    f"Generating UniXCoder embedding for {file_metadata.file_name}"
-                )
-                # Use truncated content for embedding to avoid memory issues
-                truncated_content = content[:8000] if len(content) > 8000 else content
-                embedding = self.embedding_generator.generate_embedding(
-                    truncated_content
-                )
-                if embedding:
-                    basic_result.embedding = embedding
-                    # Add to FAISS manager
-                    self.faiss_manager.add_embedding(
-                        embedding,
-                        {
-                            "file_path": file_metadata.file_path,
-                            "file_name": file_metadata.file_name,
-                            "api_name": file_metadata.api_name,
-                            "rank": file_metadata.rank,
-                            "importance_score": file_metadata.combined_importance_score,
-                            "reference_count": file_metadata.reference_count,
-                            "content_hash": content_hash,
-                        },
-                    )
-
-            # Save basic result (no AI summary yet) and add placeholder to BM25S
+            # Create content excerpt for BM25S indexing (CPU processing only)
+            content_excerpt = self._create_content_excerpt(content, file_metadata)
+            # Store content excerpt for BM25S but keep summary as None for Phase 1
+            
+            # Save basic result and add to BM25S corpus (disk I/O only)
             self.checkpoint_manager.save_result(basic_result)
-            # For Phase 1, we'll create a basic BM25S document using content excerpts
-            basic_result.summary = self._create_content_excerpt(content, file_metadata)
             self.bm25_indexer.add_document(basic_result)
 
             successful_count += 1
             logger.info(
-                f"✅ Phase 1: {file_metadata.file_name} - embedding: {'✓' if basic_result.embedding is not None else '✗'}"
+                f"✅ Phase 1: {file_metadata.file_name} - excerpt: {len(content_excerpt)} chars"
             )
 
             processed_count = (idx - start_idx) + 1
@@ -1389,16 +1962,12 @@ class ProductionEmbeddingFramework:
         end_time = datetime.now()
         total_time = (end_time - start_time).total_seconds()
 
-        # Build search indexes from Phase 1 data
-        logger.info("🔍 Building Phase 1 search indexes...")
+        # Build search indexes from Phase 1 data (CPU only)
+        logger.info("🔍 Building Phase 1 BM25S index (CPU processing)...")
         bm25_success = self.bm25_indexer.build_index()
 
-        faiss_success = False
-        if embedding_available:
-            logger.info("🧠 Building FAISS embedding index...")
-            faiss_success = self.faiss_manager.build_faiss_index()
-        else:
-            logger.info("⚠️ Skipping FAISS index (UniXCoder not available)")
+        # No FAISS index in Phase 1 - will be built in Phase 2 after AI summaries
+        logger.info("⚠️ Skipping FAISS index (will be built in Phase 2 from AI summaries)")
 
         phase1_stats = {
             "phase1_completed_at": end_time.isoformat(),
@@ -1418,13 +1987,11 @@ class ProductionEmbeddingFramework:
             "bm25_documents": (
                 len(self.bm25_indexer.corpus_texts) if bm25_success else 0
             ),
-            "faiss_index_built": faiss_success,
-            "faiss_embeddings": (
-                len(self.faiss_manager.embeddings) if faiss_success else 0
-            ),
+            "faiss_index_built": False,  # Will be built in Phase 2
+            "faiss_embeddings": 0,  # Will be created in Phase 2
         }
 
-        logger.info("✅ Phase 1 completed: Basic processing and embeddings")
+        logger.info("✅ Phase 1 completed: Content processing and BM25S indexing")
         logger.info(
             f"📊 Phase 1 stats: {successful_count}/{len(self.file_rankings)} files processed"
         )
@@ -1467,9 +2034,71 @@ class ProductionEmbeddingFramework:
 
         return excerpt[:2000]  # Limit excerpt size
 
-    async def _run_phase2_ai_summarization(self, resume: bool = True) -> Dict[str, Any]:
-        """Phase 2: AI summarization pass using Ollama."""
-        logger.info("🤖 Phase 2: AI Summarization Pass")
+    def _create_developer_focused_embedding_text(
+        self, ai_summary: str, metadata: FileMetadata
+    ) -> str:
+        """Create structured text optimized for developer search patterns."""
+        
+        # Extract domain from API name (e.g., CustomerOrder_API -> Customer Order)
+        domain = metadata.api_name.replace("_API", "").replace("_", " ")
+        
+        # Select top API dependencies for context
+        top_api_calls = ", ".join(metadata.api_calls[:5]) if metadata.api_calls else "none"
+        
+        # Build structured text that helps with various query types
+        structured_parts = [
+            # 1. Business Context (40% weight) - What does this do?
+            f"Business Function: {ai_summary}",
+            
+            # 2. API Identity (25% weight) - What is this component?
+            f"Component: {metadata.api_name} in {metadata.file_name}",
+            f"Domain: {domain}",
+            
+            # 3. System Importance (15% weight) - How critical is this?
+            f"System Importance: Rank {metadata.rank} of 9750",
+            
+            # 4. Dependencies (10% weight) - What does it interact with?
+            f"Dependencies: {len(metadata.api_calls)} API calls including {top_api_calls}",
+            
+            # 5. Implementation Details (10% weight) - What's the scope?
+            f"Implementation: {metadata.procedure_count} procedures, {metadata.function_count} functions",
+        ]
+        
+        return " | ".join(structured_parts)
+
+    async def _run_phase2_ai_and_embeddings(self, resume: bool = True) -> Dict[str, Any]:
+        """Phase 2: AI summarization using Ollama + embedding generation using BGE-M3."""
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("🤖 PHASE 2: AI SUMMARIZATION + EMBEDDING GENERATION")
+        logger.info("=" * 80)
+        logger.info("")
+        logger.info("🎯 GOAL: Generate AI summaries and high-quality embeddings from summaries")
+        logger.info("")
+        logger.info("🔄 STEP-BY-STEP PROCESS:")
+        logger.info("   1️⃣  Load Ollama model for AI summarization")
+        logger.info("   2️⃣  PHASE 2A: AI Summarization (Ollama only)")
+        logger.info("       • For each file: Generate AI summary")
+        logger.info("       • Save summaries to checkpoints")
+        logger.info("       • Unload Ollama (free VRAM)")
+        logger.info("   3️⃣  PHASE 2B: Embedding Generation (BGE-M3 only)")
+        logger.info("       • Load BGE-M3 model")
+        logger.info("       • For each AI summary: Generate structured embedding")
+        logger.info("       • Build FAISS index from embeddings")
+        logger.info("       • Unload BGE-M3 (free all VRAM)")
+        logger.info("   4️⃣  Build final FAISS vector index")
+        logger.info("   5️⃣  Unload both models (free all VRAM)")
+        logger.info("")
+        logger.info("� VRAM STRATEGY:")
+        logger.info("   • Both models loaded simultaneously (but manageable)")
+        logger.info("   • Process AI summaries sequentially (no thrashing)")
+        logger.info("   • Embeddings from clean AI summaries (higher quality)")
+        logger.info("   • No model switching during processing")
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("🏁 STARTING PHASE 2 PROCESSING...")
+        logger.info("=" * 80)
+        logger.info("")
 
         # Check Ollama availability
         if not self.ollama_processor.ensure_model():
@@ -1478,6 +2107,11 @@ class ProductionEmbeddingFramework:
                 "phase2_completed": False,
                 "phase2_error": "Ollama model not available",
             }
+
+        # DON'T Initialize BGE-M3 model yet - wait until Phase 2B
+        # This ensures Ollama has full VRAM access during AI summarization
+        logger.info("⚡ BGE-M3 model will be loaded AFTER AI summarization completes")
+        embedding_available = True  # We'll check this later in Phase 2B
 
         start_time = datetime.now()
         summarized_count = 0
@@ -1491,16 +2125,14 @@ class ProductionEmbeddingFramework:
         )
 
         for idx, result in enumerate(all_results):
-            # Skip if already has AI summary
-            if (
-                result.summary and len(result.summary) > 100
-            ):  # Assume AI summaries are longer
+            # Skip if already has AI summary (not just content excerpt)
+            if result.has_ai_summary:
                 continue
 
             # Find the file metadata
             file_metadata = None
             for metadata in self.file_rankings:
-                if metadata.file_path == result.file_path:
+                if metadata.file_path == result.file_metadata.file_path:
                     file_metadata = metadata
                     break
 
@@ -1524,15 +2156,18 @@ class ProductionEmbeddingFramework:
             if ai_result.success and ai_result.summary:
                 # Update the result with AI summary
                 result.summary = ai_result.summary
-                result.token_count = ai_result.token_count
+                result.tokens_used = ai_result.tokens_used
                 result.processing_time = ai_result.processing_time
-
-                # Re-save with AI summary
-                self.checkpoint_manager.save_result(result)
+                result.has_ai_summary = True  # Mark as AI-generated summary
+                
+                # DON'T generate embeddings yet - save that for Phase 2B
+                # Save AI summary result to separate Phase 2A file
+                self.checkpoint_manager.save_phase2a_result(result)
 
                 summarized_count += 1
+                embedding_status = "✓" if result.embedding is not None else "✗"
                 logger.info(
-                    f"✅ Phase 2: {file_metadata.file_name}: {len(ai_result.summary)} chars"
+                    f"✅ Phase 2: {file_metadata.file_name}: {len(ai_result.summary)} chars, embedding: {embedding_status}"
                 )
             else:
                 failed_count += 1
@@ -1545,6 +2180,96 @@ class ProductionEmbeddingFramework:
                 logger.info(
                     f"Phase 2 Progress: {idx+1}/{len(all_results)} files processed"
                 )
+
+        # ============================================================================
+        # PHASE 2A COMPLETE - AI Summarization done, now start Phase 2B
+        # ============================================================================
+        logger.info("")
+        logger.info("🔥 PHASE 2A COMPLETE: AI Summarization finished")
+        logger.info(f"📊 Phase 2A stats: {summarized_count} files summarized")
+        
+        # CRITICAL: Shutdown Ollama to free VRAM for BGE-M3
+        logger.info("💾 Freeing VRAM by shutting down Ollama before BGE-M3 loading...")
+        self.ollama_processor.shutdown_ollama()
+        
+        logger.info("")
+        logger.info("🚀 STARTING PHASE 2B: EMBEDDING GENERATION...")
+        logger.info("⚡ Now loading BGE-M3 model (Ollama shutdown complete)")
+        
+        # NOW initialize BGE-M3 model for embedding generation
+        logger.info("Initializing BGE-M3 embedding model...")
+        if not self.embedding_generator.initialize_model():
+            logger.warning("BGE-M3 model initialization failed - embeddings will be skipped")
+            embedding_available = False
+        else:
+            logger.info("✅ BGE-M3 model loaded successfully")
+            embedding_available = True
+
+        # Phase 2B: Generate embeddings from AI summaries
+        embedding_count = 0
+        if embedding_available:
+            # Reload results to get all AI summaries
+            all_results_with_summaries = self.checkpoint_manager.load_all_results()
+            
+            logger.info(f"Phase 2B: Generating embeddings for {len(all_results_with_summaries)} AI summaries...")
+            
+            for idx, result in enumerate(all_results_with_summaries):
+                # Skip if no AI summary or already has embedding
+                if not result.has_ai_summary or result.embedding is not None:
+                    continue
+                    
+                # Find the file metadata
+                file_metadata = None
+                for metadata in self.file_rankings:
+                    if metadata.file_path == result.file_metadata.file_path:
+                        file_metadata = metadata
+                        break
+                        
+                if not file_metadata:
+                    continue
+                    
+                # Create structured embedding text combining AI summary with metadata
+                embedding_text = self._create_developer_focused_embedding_text(
+                    result.summary, file_metadata
+                )
+                logger.debug(f"Phase 2B: Generating embedding for {file_metadata.file_name}")
+                embedding = self.embedding_generator.generate_embedding(embedding_text)
+                
+                if embedding:
+                    result.embedding = embedding
+                    embedding_count += 1
+                    
+                    # Add to FAISS manager
+                    self.faiss_manager.add_embedding(
+                        embedding,
+                        {
+                            "file_path": file_metadata.file_path,
+                            "file_name": file_metadata.file_name,
+                            "api_name": file_metadata.api_name,
+                            "rank": file_metadata.rank,
+                            "importance_score": file_metadata.combined_importance_score,
+                            "reference_count": file_metadata.reference_count,
+                            "content_hash": result.content_hash,
+                            "summary_length": len(result.summary) if result.summary else 0,
+                        },
+                    )
+                    
+                    # Save updated result with embedding to Phase 2B file
+                    self.checkpoint_manager.save_phase2b_result(result)
+                    
+                    # Progress reporting
+                    if (embedding_count % 10) == 0:
+                        logger.info(f"Phase 2B Progress: {embedding_count} embeddings generated")
+
+        # Build FAISS index from all embeddings generated in Phase 2B
+        faiss_success = False
+        faiss_count = 0
+        if embedding_available:
+            logger.info("🧠 Building FAISS embedding index from AI summaries...")
+            faiss_success = self.faiss_manager.build_faiss_index()
+            faiss_count = len(self.faiss_manager.embeddings) if faiss_success else 0
+        else:
+            logger.info("⚠️ Skipping FAISS index (BGE-M3 not available)")
 
         end_time = datetime.now()
         total_time = (end_time - start_time).total_seconds()
@@ -1563,10 +2288,12 @@ class ProductionEmbeddingFramework:
             "phase2_average_rate": (
                 (summarized_count + failed_count) / total_time if total_time > 0 else 0
             ),
+            "faiss_index_built": faiss_success,
+            "faiss_embeddings": faiss_count,
         }
 
-        logger.info("✅ Phase 2 completed: AI Summarization")
-        logger.info(f"📊 Phase 2 stats: {summarized_count} files summarized")
+        logger.info("✅ Phase 2 completed: AI Summarization + Embedding Generation")
+        logger.info(f"📊 Phase 2 stats: {summarized_count} files summarized, {faiss_count} embeddings generated")
 
         return phase2_stats
 
@@ -1628,7 +2355,7 @@ async def run_embedding_command(args) -> int:
                 f"⚠️  FAISS index build failed but {stats['faiss_embeddings']} embeddings generated"
             )
         else:
-            print(f"⚠️  UniXCoder embeddings skipped (dependencies not available)")
+            print(f"⚠️  BGE-M3 embeddings skipped (dependencies not available)")
 
         return 0
 
