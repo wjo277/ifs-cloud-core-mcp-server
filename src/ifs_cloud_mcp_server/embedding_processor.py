@@ -640,7 +640,7 @@ class FAISSIndexManager:
         logger.debug(f"🔹 Adding embedding to FAISS index: {len(embedding)} dimensions, metadata: {metadata.get('file_name', 'unknown')}")
         self.embeddings.append(embedding)
         self.embedding_metadata.append(metadata)
-        logger.info(f"📊 FAISS index now has {len(self.embeddings)} embeddings")
+        logger.debug(f"📊 FAISS index now has {len(self.embeddings)} embeddings")
 
     def build_faiss_index(self) -> bool:
         """Build FAISS index from collected embeddings."""
@@ -1400,113 +1400,61 @@ Create a detailed summary optimized for semantic search and system understanding
 Focus on business value, system relationships, and searchable concepts rather than implementation details. This summary will be used for semantic similarity matching to help users find relevant code components.
 """
 
-    def is_ollama_crashed_response(self, output: str) -> bool:
-        """Detect if Ollama output indicates a crashed/corrupted state."""
-        if not output:
-            return False
-            
-        # Check for the specific "@" crash pattern
-        stripped = output.strip()
-        if len(stripped) > 20 and all(c == '@' for c in stripped):
-            logger.warning(f"Detected Ollama crash pattern: {len(stripped)} '@' characters")
-            return True
-            
-        # Check for other crash patterns
-        crash_indicators = [
-            "model not found",
-            "connection refused",
-            "server error",
-            "internal error"
-        ]
-        
-        lower_output = output.lower()
-        for indicator in crash_indicators:
-            if indicator in lower_output:
-                return True
-                
-        return False
-
     def restart_ollama(self) -> bool:
-        """Restart Ollama server to recover from crashes."""
-        # Check if we've exceeded restart limit
-        if self.restart_count >= self.max_restarts:
-            logger.error(f"❌ Ollama restart limit exceeded ({self.max_restarts} attempts). "
-                        f"The Ollama service appears to be in a persistently corrupted state.")
-            return False
-            
-        self.restart_count += 1
-        
+        """Simple restart by warming up the model (no kill/restart needed)."""
         try:
-            logger.warning(f"🔄 Restarting Ollama server (attempt {self.restart_count}/{self.max_restarts}) due to crash detection...")
+            logger.info("🔄 Warming up Ollama model...")
             
-            # Kill any existing Ollama processes
-            logger.info("Terminating existing Ollama processes...")
-            subprocess.run(
-                ["taskkill", "/f", "/im", "ollama.exe"],
-                capture_output=True,
-                timeout=30,
-                encoding="utf-8",
-                errors="ignore"
+            # Simple warm-up request to ensure model is loaded
+            result = subprocess.run([
+                "ollama", "run", self.model,
+                "Ready to process files."
+            ],
+            capture_output=True,
+            timeout=60,
+            encoding="utf-8",
+            errors="ignore"
             )
             
-            # Wait a moment for processes to terminate
-            time.sleep(2)
-            
-            # Start Ollama server and ensure model is loaded
-            logger.info(f"Restarting Ollama and loading model {self.model}...")
-            subprocess.run(
-                ["ollama", "run", self.model, "Ready to process files."],
-                capture_output=True,
-                timeout=120,  # Allow time for model loading
-                encoding="utf-8",
-                errors="ignore"
-            )
-            
-            logger.info("✅ Ollama server restarted successfully")
-            return True
+            if result.returncode == 0:
+                logger.info("✅ Ollama model warmed up successfully")
+                return True
+            else:
+                logger.warning(f"⚠️ Ollama warm-up returned code {result.returncode}")
+                return False
             
         except Exception as e:
-            logger.error(f"Failed to restart Ollama: {e}")
+            logger.error(f"Failed to warm up Ollama: {e}")
             return False
 
     def reset_restart_counter(self):
         """Reset the restart counter after successful processing."""
-        if self.restart_count > 0:
-            logger.debug(f"Resetting Ollama restart counter (was {self.restart_count})")
-            self.restart_count = 0
+        # Simplified - no longer needed with new approach
+        pass
 
     def shutdown_ollama(self) -> bool:
-        """Shutdown Ollama server to free VRAM for other models."""
+        """Cleanly unload Ollama model using TTL=0 and empty prompt."""
         try:
-            logger.info("🔄 Shutting down Ollama server to free VRAM...")
+            logger.info("🔄 Gracefully unloading Ollama model...")
             
-            # Kill all Ollama processes to free VRAM
-            result = subprocess.run(
-                ["taskkill", "/f", "/im", "ollama.exe"],
-                capture_output=True,
-                timeout=30,
-                encoding="utf-8",
-                errors="ignore"
+            # Send empty prompt with TTL=0 to unload model cleanly
+            result = subprocess.run([
+                "ollama", "run", self.model,
+                "--keepalive", "0",  # TTL=0 to unload immediately after request
+                ""  # Empty prompt
+            ], 
+            capture_output=True,
+            timeout=30,
+            encoding="utf-8",
+            errors="ignore"
             )
             
-            # Also try to stop any ollama_llama_server processes
-            subprocess.run(
-                ["taskkill", "/f", "/im", "ollama_llama_server.exe"],
-                capture_output=True,
-                timeout=30,
-                encoding="utf-8",
-                errors="ignore"
-            )
-            
-            # Wait a moment for processes to fully terminate and VRAM to be freed
-            time.sleep(3)
-            
-            logger.info("✅ Ollama server shutdown complete - VRAM freed for next phase")
+            logger.info("✅ Ollama model unloaded cleanly - VRAM freed for next phase")
             return True
             
         except Exception as e:
-            logger.warning(f"⚠️ Error during Ollama shutdown (non-critical): {e}")
-            # Don't fail the entire process if shutdown has issues
+            logger.warning(f"⚠️ Error during Ollama model unload (non-critical): {e}")
+            # Don't fail the entire process if unload has issues
             return False
 
     def process_file(self, content: str, metadata: FileMetadata) -> ProcessingResult:
@@ -1536,117 +1484,46 @@ Focus on business value, system relationships, and searchable concepts rather th
 
             processing_time = time.time() - start_time
 
-            # Check for crash/corruption patterns
-            if result.returncode == 0 and result.stdout:
-                # Check if output indicates Ollama crashed
-                if self.is_ollama_crashed_response(result.stdout):
-                    logger.warning(f"Ollama crash detected for {metadata.file_name}")
-                    
-                    # Attempt to restart Ollama
-                    if self.restart_ollama():
-                        # Retry the file processing
-                        logger.info(f"Retrying processing of {metadata.file_name} after Ollama restart")
-                        retry_start = time.time()
-                        
-                        retry_result = subprocess.run(
-                            ["ollama", "run", self.model],
-                            input=prompt,
-                            text=True,
-                            capture_output=True,
-                            timeout=300,
-                            encoding="utf-8",
-                            errors="ignore",
-                        )
-                        
-                        processing_time = time.time() - retry_start
-                        
-                        if retry_result.returncode == 0 and retry_result.stdout:
-                            if not self.is_ollama_crashed_response(retry_result.stdout):
-                                result = retry_result  # Use successful retry result
-                                # Reset restart counter on successful retry
-                                self.reset_restart_counter()
-                                logger.info(f"✅ Successfully processed {metadata.file_name} after Ollama restart")
-                            else:
-                                # Check if this is due to restart limit being exceeded
-                                if self.restart_count >= self.max_restarts:
-                                    error_summary = (f"Failed: Ollama service is in a persistently corrupted state. "
-                                                   f"Exceeded maximum restart attempts ({self.max_restarts}). "
-                                                   f"Manual intervention required - try restarting your computer or "
-                                                   f"reinstalling Ollama.")
-                                else:
-                                    error_summary = "Failed: Ollama crashed multiple times"
-                                    
-                                logger.error(f"Ollama still crashed after restart for {metadata.file_name}")
-                                return ProcessingResult(
-                                    summary=error_summary,
-                                    metadata=asdict(metadata),
-                                    hash=content_hash,
-                                    processing_time=processing_time,
-                                    tokens_used=tokens_used,
-                                    success=False
-                                )
-                        else:
-                            logger.error(f"Retry failed for {metadata.file_name}: {retry_result.stderr}")
-                            return ProcessingResult(
-                                summary="Failed: Retry unsuccessful after Ollama restart",
-                                metadata=asdict(metadata),
-                                hash=content_hash,
-                                processing_time=processing_time,
-                                tokens_used=tokens_used,
-                                success=False
-                            )
-                    else:
-                        # Provide descriptive error based on why restart failed
-                        if self.restart_count >= self.max_restarts:
-                            error_summary = (f"Failed: Ollama service is in a persistently corrupted state. "
-                                           f"Exceeded maximum restart attempts ({self.max_restarts}). "
-                                           f"Manual intervention required - try restarting your computer or "
-                                           f"reinstalling Ollama.")
-                            logger.error(f"Ollama restart limit exceeded for {metadata.file_name}")
-                        else:
-                            error_summary = "Failed: Could not restart Ollama service"
-                            logger.error(f"Failed to restart Ollama for {metadata.file_name}")
-                            
-                        return ProcessingResult(
-                            summary=error_summary,
-                            metadata=asdict(metadata),
-                            hash=content_hash,
-                            processing_time=processing_time,
-                            tokens_used=tokens_used,
-                            success=False
-                        )
-
-            if result.returncode == 0 and result.stdout.strip():
-                # Reset restart counter on successful processing
-                self.reset_restart_counter()
-                
+            # Simple success/failure handling
+            if result.returncode == 0 and result.stdout and result.stdout.strip():
+                summary = result.stdout.strip()
                 return ProcessingResult(
                     file_metadata=metadata,
                     success=True,
                     processing_time=processing_time,
                     content_hash=content_hash,
-                    summary=result.stdout.strip(),
+                    summary=summary,
                     tokens_used=tokens_used,
+                    error_message=None
                 )
             else:
-                error_msg = result.stderr or "No output from Ollama"
+                error_msg = f"Ollama failed with return code {result.returncode}"
+                if result.stderr:
+                    error_msg += f": {result.stderr}"
+                    
                 return ProcessingResult(
                     file_metadata=metadata,
                     success=False,
                     processing_time=processing_time,
                     content_hash=content_hash,
-                    error_message=error_msg,
+                    summary=f"Failed: {error_msg}",
                     tokens_used=tokens_used,
+                    error_message=error_msg
                 )
 
         except Exception as e:
             processing_time = time.time() - start_time
+            error_msg = f"Exception during processing: {str(e)}"
+            logger.error(f"Error processing {metadata.file_name}: {error_msg}")
+            
             return ProcessingResult(
                 file_metadata=metadata,
                 success=False,
                 processing_time=processing_time,
                 content_hash=content_hash,
-                error_message=str(e),
+                summary=f"Failed: {error_msg}",
+                tokens_used=0,
+                error_message=error_msg
             )
 
 
@@ -1985,7 +1862,19 @@ class ProductionEmbeddingFramework:
 
             rankings = []
             for item in data.get("file_rankings", []):
-                metadata = FileMetadata(**item)
+                # Filter to only include fields that FileMetadata expects
+                filtered_item = {
+                    "rank": item["rank"],
+                    "file_path": item["file_path"],
+                    "relative_path": item["relative_path"],
+                    "file_name": item["file_name"],
+                    "api_name": item["api_name"],
+                    "file_size_mb": item["file_size_mb"],
+                    "api_calls": item.get("api_calls", []),
+                    "changelog_lines": item.get("changelog_lines", []),
+                    "procedure_function_names": item.get("procedure_function_names", []),
+                }
+                metadata = FileMetadata(**filtered_item)
                 rankings.append(metadata)
 
                 # Apply max_files limit if specified
@@ -2026,7 +1915,19 @@ class ProductionEmbeddingFramework:
         # Convert to FileMetadata format
         rankings = []
         for item in analysis_data.get("file_rankings", []):
-            metadata = FileMetadata(**item)
+            # Filter to only include fields that FileMetadata expects
+            filtered_item = {
+                "rank": item["rank"],
+                "file_path": item["file_path"],
+                "relative_path": item["relative_path"],
+                "file_name": item["file_name"],
+                "api_name": item["api_name"],
+                "file_size_mb": item["file_size_mb"],
+                "api_calls": item.get("api_calls", []),
+                "changelog_lines": item.get("changelog_lines", []),
+                "procedure_function_names": item.get("procedure_function_names", []),
+            }
+            metadata = FileMetadata(**filtered_item)
             rankings.append(metadata)
 
             # Apply max_files limit if specified
@@ -2548,7 +2449,7 @@ class ProductionEmbeddingFramework:
                 failed_count += 1
                 continue
 
-            logger.info(
+            logger.debug(
                 f"Phase 2: AI summarizing {file_metadata.file_name} ({idx+1}/{len(all_results)})"
             )
 
@@ -2568,7 +2469,7 @@ class ProductionEmbeddingFramework:
 
                 summarized_count += 1
                 embedding_status = "✓" if result.embedding is not None else "✗"
-                logger.info(
+                logger.debug(
                     f"✅ Phase 2: {file_metadata.file_name}: {len(ai_result.summary)} chars, embedding: {embedding_status}"
                 )
             else:
@@ -2579,9 +2480,7 @@ class ProductionEmbeddingFramework:
 
             # Progress update every 10 files
             if (idx + 1) % 10 == 0:
-                logger.info(
-                    f"Phase 2 Progress: {idx+1}/{len(all_results)} files processed"
-                )
+                logger.info(f"📊 Phase 2A Progress: {summarized_count}/{idx + 1} files summarized ({failed_count} failed)")
 
         # ============================================================================
         # PHASE 2A COMPLETE - AI Summarization done, now start Phase 2B
@@ -2629,7 +2528,7 @@ class ProductionEmbeddingFramework:
                         logger.debug(f"Skipping {result.file_metadata.file_name}: Already has embedding")
                     continue
                     
-                logger.info(f"📝 Processing embedding for: {result.file_metadata.file_name}")
+                logger.debug(f"📝 Processing embedding for: {result.file_metadata.file_name}")
                     
                 # Find the file metadata
                 file_metadata = None
@@ -2646,12 +2545,12 @@ class ProductionEmbeddingFramework:
                 embedding_text = self._create_developer_focused_embedding_text(
                     result.summary, file_metadata
                 )
-                logger.info(f"🚀 About to generate embedding for {file_metadata.file_name} (text length: {len(embedding_text)})")
+                logger.debug(f"🚀 About to generate embedding for {file_metadata.file_name} (text length: {len(embedding_text)})")
                 logger.debug(f"Phase 2B: Generating embedding for {file_metadata.file_name}")
                 embedding = self.embedding_generator.generate_embedding(embedding_text)
                 
                 if embedding:
-                    logger.info(f"✅ Successfully generated embedding for {file_metadata.file_name} ({len(embedding)} dimensions)")
+                    logger.debug(f"✅ Successfully generated embedding for {file_metadata.file_name} ({len(embedding)} dimensions)")
                     result.embedding = embedding
                     embedding_count += 1
                     
@@ -2672,10 +2571,10 @@ class ProductionEmbeddingFramework:
                     self.checkpoint_manager.save_phase2b_result(result)
                 else:
                     logger.error(f"❌ Failed to generate embedding for {file_metadata.file_name}")
-                    
-                    # Progress reporting
-                    if (embedding_count % 10) == 0:
-                        logger.info(f"Phase 2B Progress: {embedding_count} embeddings generated")
+                
+                # Progress reporting every 10 embeddings
+                if embedding_count > 0 and (embedding_count % 10) == 0:
+                    logger.info(f"📊 Phase 2B Progress: {embedding_count} embeddings generated")
 
         # Build FAISS index from all embeddings generated in Phase 2B
         faiss_success = False
