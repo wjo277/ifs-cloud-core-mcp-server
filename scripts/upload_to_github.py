@@ -1,37 +1,222 @@
 """
-GitHub Release Upload Script for Quantized Models
+GitHub Release Upload Script for IFS Cloud MCP Server
 
-This script automates the process of uploading the quantized FastAI models
-to GitHub releases using the GitHub CLI with device authentication.
+This script automates the process of uploading safe files (embeddings, indexes,
+and PageRank data) to GitHub releases using the GitHub CLI.
+
+The updated version:
+- Asks user for release tag (e.g., v1.0.0) instead of deriving from version
+- Validates that the tag is greater than the latest release
+- Creates individual ZIP files for each version (e.g., "25.1.0.zip")
+- Uploads all version ZIPs to a single release
+
+Safe files for publishing:
+- FAISS embeddings (vector representations)
+- BM25S indexes (bag-of-words, no source code)
+- PageRank results (file rankings only)
+
+NOT included:
+- Comprehensive analysis files (contain source code samples)
 """
 
 import subprocess
 import sys
 import json
 import time
+import zipfile
+import re
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
+from packaging import version
+
+from ifs_cloud_mcp_server.directory_utils import get_data_directory
 
 
 class GitHubReleaseUploader:
-    """Upload models to GitHub releases using GitHub CLI."""
+    """Upload safe MCP server files to GitHub releases using GitHub CLI."""
 
     def __init__(self, repo: str = "graknol/ifs-cloud-core-mcp-server"):
         """Initialize the uploader."""
         self.repo = repo
-        self.dist_dir = Path(__file__).parent.parent / "dist"
+        self.data_dir = get_data_directory() / "versions"
 
-        # Model files to upload
-        self.model_files = {
-            "primary": {
-                "file": "fastai_intent_classifier_quantized.pkl",
-                "description": "Quantized FastAI Intent Classifier (Primary - 48% smaller, 22% faster)",
-            },
-            "fallback": {
-                "file": "fastai_intent_classifier.pkl",
-                "description": "Original FastAI Intent Classifier (Fallback - Full precision)",
-            },
-        }
+    def find_available_versions(self) -> List[str]:
+        """Find all available versions with safe files to upload."""
+        if not self.data_dir.exists():
+            return []
+
+        versions = []
+        for version_dir in self.data_dir.iterdir():
+            if version_dir.is_dir() and self._has_safe_files(version_dir):
+                versions.append(version_dir.name)
+
+        return sorted(versions)
+
+    def _has_safe_files(self, version_dir: Path) -> bool:
+        """Check if version directory has safe files to upload."""
+        safe_files = self._get_safe_files(version_dir.name)
+        return len(safe_files) > 0
+
+    def _get_safe_files(self, version: str) -> List[Tuple[Path, str]]:
+        """Get list of safe files for a version with their descriptions."""
+        version_dir = self.data_dir / version
+        safe_files = []
+
+        # FAISS embeddings and indexes (safe - just vectors)
+        faiss_dir = version_dir / "faiss"
+        if faiss_dir.exists():
+            for faiss_file in faiss_dir.glob("*"):
+                if faiss_file.is_file():
+                    if faiss_file.suffix == ".faiss":
+                        desc = f"FAISS vector index for {version} (semantic search)"
+                    elif faiss_file.suffix == ".pkl":
+                        desc = f"FAISS metadata for {version} (embeddings)"
+                    elif faiss_file.suffix == ".npy":
+                        desc = f"FAISS embeddings for {version} (vectors)"
+                    else:
+                        desc = f"FAISS support file for {version}"
+                    safe_files.append((faiss_file, desc))
+
+        # BM25S indexes (safe - bag of words, no source code)
+        bm25s_dir = version_dir / "bm25s"
+        if bm25s_dir.exists():
+            for bm25s_file in bm25s_dir.glob("*"):
+                if bm25s_file.is_file():
+                    if "index" in bm25s_file.name:
+                        desc = f"BM25S lexical search index for {version}"
+                    elif "corpus" in bm25s_file.name:
+                        desc = f"BM25S tokenized corpus for {version}"
+                    elif "metadata" in bm25s_file.name:
+                        desc = f"BM25S index metadata for {version}"
+                    else:
+                        desc = f"BM25S support file for {version}"
+                    safe_files.append((bm25s_file, desc))
+
+        # PageRank results (safe - just file names and rankings)
+        pagerank_file = version_dir / "ranked.jsonl"
+        if pagerank_file.exists():
+            desc = f"PageRank file rankings for {version} (importance scores)"
+            safe_files.append((pagerank_file, desc))
+
+        return safe_files
+
+    def get_latest_release_version(self) -> Optional[str]:
+        """Get the latest release version from GitHub."""
+        try:
+            result = subprocess.run(
+                [
+                    "gh",
+                    "release",
+                    "list",
+                    "--repo",
+                    self.repo,
+                    "--limit",
+                    "1",
+                    "--json",
+                    "tagName",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            releases = json.loads(result.stdout)
+            if releases:
+                # Remove 'v' prefix if present
+                tag = releases[0]["tagName"]
+                return tag.lstrip("v")
+            return None
+        except Exception as e:
+            print(f"⚠️ Could not fetch latest release: {e}")
+            return None
+
+    def validate_version_tag(
+        self, new_tag: str, latest_version: Optional[str] = None
+    ) -> bool:
+        """Validate that the new version tag is greater than the latest release."""
+        # Remove 'v' prefix if present for comparison
+        new_version = new_tag.lstrip("v")
+
+        # Basic version format validation
+        if not re.match(r"^\d+\.\d+\.\d+$", new_version):
+            print(f"❌ Invalid version format: {new_tag}")
+            print("   Version should be in format: v1.0.0 or 1.0.0")
+            return False
+
+        if latest_version:
+            try:
+                if version.parse(new_version) <= version.parse(latest_version):
+                    print(
+                        f"❌ Version {new_tag} must be greater than latest release v{latest_version}"
+                    )
+                    return False
+            except Exception as e:
+                print(f"⚠️ Could not compare versions: {e}")
+                # Continue anyway if version parsing fails
+
+        return True
+
+    def create_version_zip(
+        self, version_name: str, safe_files: List[Tuple[Path, str]]
+    ) -> Optional[Path]:
+        """Create a ZIP file containing all safe files for a specific version."""
+        if not safe_files:
+            return None
+
+        # Create ZIP file in the version directory
+        version_dir = self.data_dir / version_name
+        zip_path = version_dir / f"{version_name}.zip"
+
+        print(f"   📦 Creating ZIP archive: {zip_path.name}")
+
+        try:
+            with zipfile.ZipFile(
+                zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9
+            ) as zipf:
+                total_original_size = 0
+
+                for file_path, description in safe_files:
+                    if file_path.exists():
+                        # Add file to ZIP with relative path structure
+                        relative_path = file_path.relative_to(version_dir)
+                        zipf.write(file_path, relative_path)
+
+                        file_size = file_path.stat().st_size
+                        total_original_size += file_size
+                        print(
+                            f"      + {relative_path} ({file_size / (1024*1024):.1f} MB)"
+                        )
+                    else:
+                        print(f"      ! {file_path.name} - Not found, skipping")
+
+                # Add a manifest file with version info
+                manifest_content = f"""# IFS Cloud MCP Server - Version {version_name}
+# Generated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
+# Contains safe files only (no source code)
+
+Files included:
+"""
+                for file_path, description in safe_files:
+                    if file_path.exists():
+                        relative_path = file_path.relative_to(version_dir)
+                        manifest_content += f"- {relative_path} - {description}\n"
+
+                zipf.writestr("README.txt", manifest_content)
+
+            zip_size = zip_path.stat().st_size
+            compression_ratio = (
+                (1 - zip_size / total_original_size) * 100
+                if total_original_size > 0
+                else 0
+            )
+
+            print(
+                f"   ✅ ZIP created: {zip_size / (1024*1024):.1f} MB ({compression_ratio:.1f}% compressed)"
+            )
+            return zip_path
+
+        except Exception as e:
+            print(f"   ❌ Failed to create ZIP: {e}")
+            return None
 
     def check_github_cli(self) -> bool:
         """Check if GitHub CLI is installed and available."""
@@ -75,35 +260,6 @@ class GitHubReleaseUploader:
         except subprocess.CalledProcessError as e:
             print(f"❌ Authentication failed: {e}")
             return False
-
-    def check_model_files(self) -> bool:
-        """Check if model files exist and get their info."""
-        print("\n📁 Checking model files...")
-
-        all_exist = True
-        total_size = 0
-
-        for model_type, info in self.model_files.items():
-            file_path = self.dist_dir / info["file"]
-
-            if file_path.exists():
-                size_mb = file_path.stat().st_size / (1024 * 1024)
-                total_size += size_mb
-                print(f"   ✅ {info['file']} ({size_mb:.1f} MB)")
-            else:
-                print(f"   ❌ {info['file']} - Not found!")
-                all_exist = False
-
-        if all_exist:
-            print(f"\n📊 Total upload size: {total_size:.1f} MB")
-
-            if total_size > 100:
-                print("⚠️ Large upload detected - this may take some time")
-        else:
-            print("\n❌ Some model files are missing!")
-            print("Please run: uv run python scripts/prepare_model_release.py")
-
-        return all_exist
 
     def get_existing_releases(self) -> List[Dict]:
         """Get list of existing releases."""
@@ -158,16 +314,18 @@ class GitHubReleaseUploader:
             print(f"❌ Failed to create release: {e}")
             return False
 
-    def upload_assets(self, tag: str) -> bool:
-        """Upload model files to the release."""
+    def upload_assets(self, tag: str, version_zips: List[Path]) -> bool:
+        """Upload version ZIP files to the release."""
         print(f"\n📤 Uploading assets to release {tag}...")
+
+        if not version_zips:
+            print("❌ No ZIP files to upload!")
+            return False
 
         success = True
 
-        for model_type, info in self.model_files.items():
-            file_path = self.dist_dir / info["file"]
-
-            print(f"   Uploading {info['file']}...")
+        for zip_path in version_zips:
+            print(f"   Uploading {zip_path.name}...")
 
             try:
                 subprocess.run(
@@ -176,7 +334,7 @@ class GitHubReleaseUploader:
                         "release",
                         "upload",
                         tag,
-                        str(file_path),
+                        str(zip_path),
                         "--repo",
                         self.repo,
                         "--clobber",  # Overwrite if exists
@@ -184,134 +342,261 @@ class GitHubReleaseUploader:
                     check=True,
                 )
 
-                print(f"   ✅ {info['file']} uploaded successfully")
+                zip_size = zip_path.stat().st_size / (1024 * 1024)
+                print(
+                    f"   ✅ {zip_path.name} uploaded successfully ({zip_size:.1f} MB)"
+                )
 
             except subprocess.CalledProcessError as e:
-                print(f"   ❌ Failed to upload {info['file']}: {e}")
+                print(f"   ❌ Failed to upload {zip_path.name}: {e}")
                 success = False
 
         return success
 
-    def generate_release_notes(self, tag: str) -> str:
-        """Generate release notes for the model release."""
-        return f"""# IFS Cloud MCP Server {tag}
+    def generate_release_notes(
+        self, tag: str, available_versions: List[str], version_zips: List[Path]
+    ) -> str:
+        """Generate release notes for the IFS Cloud MCP server release."""
 
-## 🚀 Quantized Model Release
+        zip_info = ""
+        for zip_path in version_zips:
+            size_mb = zip_path.stat().st_size / (1024 * 1024)
+            zip_info += f"- **`{zip_path.name}`** - Pre-built indexes for IFS Cloud {zip_path.stem} ({size_mb:.1f} MB)\n"
 
-This release features the new **quantized FastAI intent classifier** as the default model, delivering significant performance improvements:
+        versions_list = ""
+        for ver in available_versions:
+            versions_list += f"- **{ver}** - Ready for immediate use\n"
 
-### 📊 Performance Improvements
-- **48% smaller file size** (121.1 MB → 63.0 MB)
-- **22% faster inference** (22.4 ms → 17.4 ms)  
-- **Same accuracy** as original model
-- **Lower memory usage** (~62 MB reduction)
+        return f"""# IFS Cloud MCP Server - Release {tag}
+
+## 🚀 Pre-built Search Indexes Release
+
+This release contains **pre-built search indexes and rankings** for multiple IFS Cloud versions, allowing you to use the MCP server without running the resource-intensive embedding generation process.
 
 ### 📦 Release Assets
 
-**Primary Model (Recommended):**
-- `fastai_intent_classifier_quantized.pkl` - Optimized quantized model for production use
+{zip_info}
 
-**Fallback Model:**
-- `fastai_intent_classifier.pkl` - Original full-precision model for compatibility
+Each ZIP file contains:
+- **FAISS Embeddings**: Vector representations for semantic search
+- **BM25S Indexes**: Tokenized lexical search indexes  
+- **PageRank Results**: File importance rankings and metadata
 
-### 🔧 Usage
+### 🔧 Quick Start
 
-The quantized model is now the **default choice** for new installations. The system will automatically:
-1. Download the quantized model first
-2. Fall back to original model if needed
-3. Provide seamless compatibility
-
-### 💾 Manual Download
+1. **Download** the ZIP file for your IFS Cloud version
+2. **Extract** to your MCP server data directory
+3. **Start** the server - indexes will be automatically detected
 
 ```bash
-# Download quantized model (default)
-python -m ifs_cloud_mcp_server.model_downloader
+# Extract indexes (example for version 25.1.0)
+unzip 25.1.0.zip -d ~/.local/share/ifs_cloud_mcp_server/versions/
 
-# Download original model  
-python -m ifs_cloud_mcp_server.model_downloader --original
+# Start the MCP server
+python -m src.ifs_cloud_mcp_server.main server --version 25.1.0
 ```
 
-### 🎯 Benefits for Production
+### 🎯 Available Versions
 
-- **Faster startup** - Smaller model loads faster
-- **Better response time** - 22% faster predictions
-- **Lower resource usage** - Reduced memory footprint
-- **Same search quality** - No accuracy degradation
+{versions_list}
 
-## 📋 Migration Notes
+### ✅ What's Included (Safe for Distribution)
 
-Existing installations will automatically upgrade to the quantized model on next restart. No manual intervention required.
+These files contain **NO source code** and are safe for public distribution:
+- **FAISS Embeddings**: Vector representations of semantic meaning only
+- **BM25S Indexes**: Tokenized bag-of-words (impossible to extract source code)  
+- **PageRank Results**: File importance rankings (names and scores only)
+
+### ❌ What's NOT Included
+
+The following files must be generated locally as they contain source code samples:
+- Comprehensive analysis files (`comprehensive_plsql_analysis.json`)
+- Raw source file excerpts or content
+
+### 🔧 Manual Generation
+
+If you need to generate these files yourself or customize the analysis:
+
+```bash
+# 1. Import IFS Cloud ZIP file  
+python -m src.ifs_cloud_mcp_server.main import /path/to/ifscloud-VERSION.zip
+
+# 2. Generate analysis (contains source samples - not published)
+python -m src.ifs_cloud_mcp_server.main analyze --version VERSION
+
+# 3. Create embeddings (requires NVIDIA GPU)
+python -m src.ifs_cloud_mcp_server.main embed --version VERSION
+
+# 4. Calculate PageRank rankings
+python -m src.ifs_cloud_mcp_server.main calculate-pagerank --version VERSION
+```
+
+### 🎯 Benefits
+
+- **Multiple Versions**: Download only what you need
+- **Instant Setup**: No need to run resource-intensive embedding generation
+- **No GPU Required**: Use pre-built indexes without NVIDIA GPU
+- **Fast Downloads**: Optimized file sizes for quick deployment
+- **Production Ready**: Battle-tested indexes for reliable search
+
+### 📋 System Requirements
+
+- Python 3.11+
+- IFS Cloud MCP Server package
+- Disk space varies by version (see individual ZIP sizes above)
 
 ---
 
-*Built with FastAI, PyTorch quantization, and comprehensive testing.*"""
+*These indexes were generated using the production embedding framework with PageRank prioritization and comprehensive dependency analysis.*"""
 
     def interactive_release_flow(self) -> bool:
         """Interactive flow for creating and uploading release."""
         print("\n" + "=" * 60)
-        print("🚀 GITHUB RELEASE UPLOAD WIZARD")
+        print("🚀 IFS CLOUD MCP SERVER RELEASE WIZARD")
         print("=" * 60)
 
-        # Get existing releases for reference
+        # Find available versions
+        available_versions = self.find_available_versions()
+        if not available_versions:
+            print("\n❌ No versions with safe files found!")
+            print("\nTo create safe files for a version:")
+            print(
+                "1. Import ZIP: python -m src.ifs_cloud_mcp_server.main import /path/to/version.zip"
+            )
+            print(
+                "2. Analyze: python -m src.ifs_cloud_mcp_server.main analyze --version VERSION"
+            )
+            print(
+                "3. Embed: python -m src.ifs_cloud_mcp_server.main embed --version VERSION"
+            )
+            print(
+                "4. PageRank: python -m src.ifs_cloud_mcp_server.main calculate-pagerank --version VERSION"
+            )
+            return False
+
+        # Get existing releases and latest version for comparison
         existing_releases = self.get_existing_releases()
+        latest_version = self.get_latest_release_version()
+
         if existing_releases:
             print("\n📋 Existing releases:")
             for release in existing_releases[:5]:  # Show last 5
                 prerelease_mark = " (prerelease)" if release.get("isPrerelease") else ""
                 print(f"   • {release['tagName']}{prerelease_mark}")
 
-        # Get release details from user
-        print("\n📝 Release Information:")
+        if latest_version:
+            print(f"\n📌 Latest release: v{latest_version}")
 
-        # Suggest next version
-        if existing_releases:
-            last_tag = existing_releases[0]["tagName"]
-            print(f"   Last release: {last_tag}")
+        # Show available versions
+        print(f"\n📁 Available versions with safe files:")
+        for i, version in enumerate(available_versions, 1):
+            print(f"   {i}. {version}")
 
-        tag = input("   Enter release tag (e.g., v1.1.0): ").strip()
-        if not tag:
-            print("❌ Tag is required!")
+        # Get release tag from user
+        print(f"\n🏷️ Release Tag:")
+        tag_input = input("   Enter release tag (e.g., v1.0.0): ").strip()
+        if not tag_input:
+            print("❌ Release tag is required!")
             return False
 
+        # Validate version tag
+        if not self.validate_version_tag(tag_input, latest_version):
+            return False
+
+        # Create ZIP files for each version
+        print(f"\n📦 Creating ZIP archives for all versions...")
+        version_zips = []
+        total_archive_size = 0
+
+        for version_name in available_versions:
+            print(f"\n🔄 Processing version {version_name}...")
+
+            # Get safe files for this version
+            safe_files = self._get_safe_files(version_name)
+            if not safe_files:
+                print(f"   ⚠️ No safe files found for {version_name}, skipping")
+                continue
+
+            # Create ZIP for this version
+            zip_path = self.create_version_zip(version_name, safe_files)
+            if zip_path:
+                version_zips.append(zip_path)
+                zip_size = zip_path.stat().st_size
+                total_archive_size += zip_size
+                print(
+                    f"   ✅ Created {zip_path.name} ({zip_size / (1024*1024):.1f} MB)"
+                )
+            else:
+                print(f"   ❌ Failed to create ZIP for {version_name}")
+
+        if not version_zips:
+            print("❌ No ZIP files created - cannot proceed with release!")
+            return False
+
+        print(
+            f"\n📊 Summary: {len(version_zips)} ZIP files created, total size: {total_archive_size / (1024*1024):.1f} MB"
+        )
+
+        # Get release details
+        print(f"\n📝 Release Details:")
         title = input(
-            f"   Enter release title (default: 'IFS Cloud MCP Server {tag}'): "
+            f"   Enter release title (default: 'IFS Cloud MCP Server {tag_input} - Multi-Version Indexes'): "
         ).strip()
         if not title:
-            title = f"IFS Cloud MCP Server {tag}"
+            title = f"IFS Cloud MCP Server {tag_input} - Multi-Version Indexes"
 
         prerelease = input("   Is this a prerelease? (y/N): ").strip().lower() == "y"
 
         # Generate release notes
-        notes = self.generate_release_notes(tag)
+        notes = self.generate_release_notes(tag_input, available_versions, version_zips)
         print(f"\n📄 Generated release notes preview:")
         print("-" * 40)
-        print(notes[:500] + "..." if len(notes) > 500 else notes)
+        print(notes[:800] + "..." if len(notes) > 800 else notes)
         print("-" * 40)
 
         confirm = (
-            input("\nProceed with release creation and upload? (Y/n): ").strip().lower()
+            input(
+                f"\nProceed with release creation and upload for {tag_input}? (Y/n): "
+            )
+            .strip()
+            .lower()
         )
         if confirm == "n":
             print("❌ Release cancelled by user")
             return False
 
         # Create release
-        if not self.create_release(tag, title, notes, prerelease):
+        if not self.create_release(tag_input, title, notes, prerelease):
             return False
 
-        # Upload assets
-        if not self.upload_assets(tag):
+        # Upload ZIP files
+        if not self.upload_assets(tag_input, version_zips):
             print("⚠️ Release created but some assets failed to upload")
             return False
 
-        print(f"\n🎉 SUCCESS! Release {tag} created and assets uploaded!")
-        print(f"🔗 View release: https://github.com/{self.repo}/releases/tag/{tag}")
+        print(
+            f"\n🎉 SUCCESS! Release {tag_input} created and {len(version_zips)} ZIP files uploaded!"
+        )
+        print(
+            f"🔗 View release: https://github.com/{self.repo}/releases/tag/{tag_input}"
+        )
+        print(f"\n📊 Release Summary:")
+        print(f"   • Tag: {tag_input}")
+        print(f"   • Versions included: {', '.join(available_versions)}")
+        print(f"   • Total archive size: {total_archive_size / (1024*1024):.1f} MB")
+        print(f"   • ZIP files uploaded: {len(version_zips)}")
 
         return True
 
     def run(self) -> bool:
         """Run the complete upload process."""
-        print("🚀 GitHub Release Upload for Quantized Models")
+        print("🚀 IFS Cloud MCP Server - GitHub Release Upload")
+        print("=" * 50)
+        print("📋 Uploading safe files only:")
+        print("   ✅ FAISS embeddings (vector representations)")
+        print("   ✅ BM25S indexes (tokenized search)")
+        print("   ✅ PageRank results (file rankings)")
+        print("   ❌ Source code analysis (must be generated locally)")
         print("=" * 50)
 
         # 1. Check GitHub CLI
@@ -323,11 +608,7 @@ Existing installations will automatically upgrade to the quantized model on next
             if not self.authenticate():
                 return False
 
-        # 3. Check model files
-        if not self.check_model_files():
-            return False
-
-        # 4. Interactive release flow
+        # 3. Interactive release flow (includes file checking)
         return self.interactive_release_flow()
 
 
@@ -341,9 +622,9 @@ def main():
         if success:
             print("\n✅ Upload completed successfully!")
             print("\n📋 Next steps:")
-            print("1. Test download with new release")
-            print("2. Update DEFAULT_TAG in model_downloader.py")
-            print("3. Update documentation if needed")
+            print("1. Test MCP server with published indexes")
+            print("2. Update documentation with new release")
+            print("3. Notify users about available pre-built indexes")
         else:
             print("\n❌ Upload failed or was cancelled")
             sys.exit(1)
