@@ -106,12 +106,11 @@ Available IFS Cloud versions:
 [
   {
     "version": "25.1.0",
-    "extract_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0",
-    "index_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\indexes\\25.1.0",
-    "analysis_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\analysis\\comprehensive_plsql_analysis.json",
-    "bm25s_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\bm25s",
-    "faiss_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\faiss",
-    "pagerank_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\ranked.jsonl",
+    "extract_path": "C:\\Users\\sindre\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0",
+    "analysis_path": "C:\\Users\\sindre\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\analysis\\comprehensive_plsql_analysis.json",
+    "bm25s_path": "C:\\Users\\sindre\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\bm25s",
+    "faiss_path": "C:\\Users\\sindre\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\faiss",
+    "pagerank_path": "C:\\Users\\sindre\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\ranked.jsonl",
     "has_analysis": false,
     "has_bm25s": true,
     "has_faiss": true,
@@ -581,7 +580,6 @@ const handleCLIError = (command: string, result: CommandResult): CLIError => {
 interface Version {
   version: string;
   extract_path: string;
-  index_path: string;
   analysis_path: string;
   bm25s_path: string;
   faiss_path: string;

@@ -468,9 +468,6 @@ def handle_list_command(args) -> int:
                     analysis_file = get_version_analysis_file(version)
                     pagerank_file = get_version_base_directory(version) / "ranked.jsonl"
 
-                    # Check legacy index structure
-                    index_path = indexes_dir / version_dir.name
-
                     # Get file count
                     file_count = 0
                     if version_dir.exists():
@@ -498,12 +495,11 @@ def handle_list_command(args) -> int:
                     has_full_analysis = (
                         has_analysis and has_hybrid_search
                     )  # Complete analysis + search
-                    is_ready = has_hybrid_search or index_path.exists()
+                    is_ready = has_hybrid_search
 
                     version_info = {
                         "version": version_dir.name,
                         "extract_path": str(version_dir),
-                        "index_path": str(index_path),  # Legacy path for compatibility
                         "analysis_path": str(analysis_file),
                         "bm25s_path": str(bm25s_dir),
                         "faiss_path": str(faiss_dir),
@@ -543,8 +539,6 @@ def handle_list_command(args) -> int:
                         status = "✅ Ready (Full Analysis + Hybrid Search)"
                     elif v["has_hybrid_search"]:
                         status = "✅ Ready (Hybrid Search)"
-                    elif Path(v["index_path"]).exists():
-                        status = "✅ Ready (Legacy Index)"
                     else:
                         status = "⚠️  Not analyzed"
 
@@ -563,8 +557,6 @@ def handle_list_command(args) -> int:
                         components.append("FAISS")
                     if v["has_pagerank"]:
                         components.append("PageRank")
-                    if Path(v["index_path"]).exists():
-                        components.append("Legacy-Index")
 
                     if components:
                         print(f"   Components: {', '.join(components)}")
@@ -682,7 +674,7 @@ def handle_server_command(args) -> int:
 
         # Create server with the version base directory
         server = IFSCloudMCPServer(
-            index_path=version_base_dir,
+            version_path=version_base_dir,
             name=getattr(args, "name", "ifs-cloud-mcp-server"),
         )
 

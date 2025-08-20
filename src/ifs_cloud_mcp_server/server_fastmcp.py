@@ -18,26 +18,26 @@ class IFSCloudMCPServer:
     """IFS Cloud MCP Server providing development guidance."""
 
     def __init__(
-        self, index_path: Path = None, name: str = "IFS Cloud Development Server"
+        self, version_path: Path = None, name: str = "IFS Cloud Development Server"
     ):
         """Initialize the IFS Cloud MCP Server.
 
         Args:
-            index_path: Path to the version directory containing analysis and search indexes
+            version_path: Path to the version directory containing analysis and search indexes
             name: Name for the MCP server
         """
         self.mcp = FastMCP(name)
 
         # Initialize paths
-        if index_path:
-            self.index_path = Path(index_path)
+        if version_path:
+            self.version_path = Path(version_path)
         else:
             from .directory_utils import get_data_directory
 
-            self.index_path = get_data_directory()
+            self.version_path = get_data_directory()
 
-        self.index_path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Using index path: {self.index_path}")
+        self.version_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using index path: {self.version_path}")
 
         # Initialize search engine
         self.search_engine = None
@@ -49,8 +49,8 @@ class IFSCloudMCPServer:
     def _initialize_search_engine(self):
         """Initialize the hybrid search engine if embeddings are available."""
         try:
-            # The index_path now points directly to versions/version_name
-            version_dir = self.index_path
+            # The version_path now points directly to versions/version_name
+            version_dir = self.version_path
 
             # Look for the faiss directory which contains the embeddings
             faiss_dir = version_dir / "faiss"
