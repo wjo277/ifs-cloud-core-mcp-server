@@ -282,20 +282,26 @@ PROCEDURE New___ (
             - "lexical": Exact matching only (best for specific API names, error codes)
 
             **Query Guidelines:**
-            - **Hybrid mode**: Provide either `query` (used for both) OR separate `semantic_query` + `lexical_query`
+            - **Hybrid mode (PREFERRED)**: ALWAYS provide BOTH `semantic_query` AND `lexical_query` for best results:
+              * `semantic_query`: Business concepts like "customer validation", "order processing"
+              * `lexical_query`: Exact terms like "CUSTOMER_ORDER_API", "Check_Insert___"
+            - **Alternative**: Use single `query` (will be used for both semantic and lexical)
             - **Semantic mode**: Use conceptual terms like "customer validation", "order processing"
             - **Lexical mode**: Use exact terms like "CUSTOMER_ORDER_API", "Check_Insert___"
 
             **Best Results Tips:**
             - For finding specific APIs: Use lexical mode with exact API names
             - For understanding functionality: Use semantic mode with business terms
-            - For comprehensive research: Use hybrid mode with business concepts
+            - For comprehensive research: Use hybrid mode with BOTH semantic and lexical queries
             - For error investigation: Use lexical mode with error messages
 
             **Examples:**
-            - Hybrid: query="customer order validation"
-            - Semantic: semantic_query="how to validate customer data", lexical_query="Customer_Order_API"
-            - Lexical: query="CUSTOMER_ORDER_API.Check_Insert___"
+            - **Hybrid (BEST)**: semantic_query="customer order validation logic", lexical_query="Customer_Order_API"
+            - Hybrid fallback: query="customer order validation"
+            - Semantic: semantic_query="how to validate customer data"
+            - Lexical: lexical_query="CUSTOMER_ORDER_API.Check_Insert___"
+
+            **IMPORTANT**: For hybrid searches, send BOTH semantic_query AND lexical_query parameters for optimal results!
 
             Returns detailed search results with file paths, API names, snippets, and explanations.
             """
@@ -338,6 +344,14 @@ The search engine is not initialized. This usually means:
                         semantic_query = ""
                 else:  # hybrid mode
                     config = SearchConfig.medium_hardware()  # Balanced default
+                    # For hybrid mode, if only query is provided, use it for both semantic and lexical
+                    if query and not semantic_query and not lexical_query:
+                        semantic_query = query
+                        lexical_query = query
+                    elif not semantic_query:
+                        semantic_query = query or ""
+                    elif not lexical_query:
+                        lexical_query = query or ""
 
                 # Perform the search
                 response = self.search_engine.search(
