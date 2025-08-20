@@ -503,18 +503,24 @@ class HybridSearchEngine:
             query_tokens = self.bm25_indexer._advanced_tokenize(query)
             stemmed_tokens = self.bm25_indexer._stem_tokens(query_tokens)
 
-            # Search BM25S index
-            scores, doc_indices = self.bm25_indexer.bm25_index.retrieve(
-                self.bm25_indexer.corpus_texts, stemmed_tokens, k=top_k
-            )
+            if not stemmed_tokens:
+                logger.warning(f"No valid tokens found in query: '{query}'")
+                return []
 
-            results = []
-            for score, doc_idx in zip(scores[0], doc_indices[0]):
+            # BM25S expects a list of token lists (for batch processing)
+            query_batch = [stemmed_tokens]
+
+            # Search BM25S index - correct parameter order
+            results = self.bm25_indexer.bm25_index.retrieve(query_batch, k=top_k)
+            doc_ids, scores = results
+
+            search_results = []
+            for doc_id, score in zip(doc_ids[0], scores[0]):  # First query in batch
                 if score > 0:  # Only include positive scores
-                    doc_info = self.bm25_indexer.get_document_info(int(doc_idx))
+                    doc_info = self.bm25_indexer.get_document_info(doc_id)
                     if doc_info:
                         result = SearchResult(
-                            doc_id=int(doc_idx),
+                            doc_id=doc_id,
                             file_path=doc_info["relative_path"],
                             file_name=doc_info["file_name"],
                             api_name=doc_info["api_name"],
@@ -528,9 +534,9 @@ class HybridSearchEngine:
                             explanation="",
                             match_type="exact",
                         )
-                        results.append(result)
+                        search_results.append(result)
 
-            return results
+            return search_results
 
         except Exception as e:
             logger.error(f"BM25S search failed: {e}")

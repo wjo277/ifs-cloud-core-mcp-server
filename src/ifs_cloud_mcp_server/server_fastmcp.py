@@ -39,15 +39,24 @@ class IFSCloudMCPServer:
         self.version_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"Using index path: {self.version_path}")
 
-        # Initialize search engine
+        # Lazy initialization - only load when first tool is called
         self.search_engine = None
-        self._initialize_search_engine()
+        self._search_engine_initialized = False
+        self._search_engine_loading = False
 
         # Register tools
         self._register_tools()
 
     def _initialize_search_engine(self):
-        """Initialize the hybrid search engine if embeddings are available."""
+        """Initialize the hybrid search engine if embeddings are available.
+
+        This is called lazily when the first search tool is invoked.
+        """
+        if self._search_engine_initialized or self._search_engine_loading:
+            return
+
+        self._search_engine_loading = True
+
         try:
             # The version_path now points directly to versions/version_name
             version_dir = self.version_path
@@ -56,20 +65,24 @@ class IFSCloudMCPServer:
             faiss_dir = version_dir / "faiss"
 
             if faiss_dir.exists():
+                logger.info("🔍 Initializing search engine (lazy loading)...")
+
+                # Import heavy modules only when needed
                 from .hybrid_search import HybridSearchEngine
 
                 self.search_engine = HybridSearchEngine(faiss_dir)
-                logger.info("✅ Search engine initialized with FAISS directory")
+                logger.info("✅ Search engine initialized successfully")
             else:
                 logger.warning(
                     f"⚠️  No FAISS embeddings found in {faiss_dir}. Search functionality will be limited."
                 )
-                logger.info(
-                    f"Run embeddings creation: python -m src.ifs_cloud_mcp_server.main embed --version <version>"
-                )
+                self.search_engine = None
         except Exception as e:
             logger.error(f"❌ Failed to initialize search engine: {e}")
             self.search_engine = None
+        finally:
+            self._search_engine_initialized = True
+            self._search_engine_loading = False
 
     def _register_tools(self):
         """Register MCP tools for IFS Cloud development guidance."""
@@ -286,6 +299,10 @@ PROCEDURE New___ (
 
             Returns detailed search results with file paths, API names, snippets, and explanations.
             """
+            # Lazy load search engine when first tool is called
+            if not self._search_engine_initialized:
+                self._initialize_search_engine()
+
             if not self.search_engine:
                 return """❌ **Search Not Available**
 
@@ -301,10 +318,11 @@ The search engine is not initialized. This usually means:
 **Alternative:** Use the guidance tool to understand IFS architecture patterns while waiting for search setup."""
 
             try:
+                # Import heavy modules only when needed
+                from .hybrid_search import SearchConfig
+
                 # Determine search configuration based on mode
                 if search_mode == "semantic":
-                    from .hybrid_search import SearchConfig
-
                     config = SearchConfig(enable_faiss=True, enable_flashrank=False)
                     # For semantic-only, prioritize the semantic query
                     if semantic_query is None:
@@ -312,8 +330,6 @@ The search engine is not initialized. This usually means:
                     if lexical_query is None:
                         lexical_query = ""
                 elif search_mode == "lexical":
-                    from .hybrid_search import SearchConfig
-
                     config = SearchConfig(enable_faiss=False, enable_flashrank=False)
                     # For lexical-only, prioritize the lexical query
                     if lexical_query is None:
@@ -321,8 +337,6 @@ The search engine is not initialized. This usually means:
                     if semantic_query is None:
                         semantic_query = ""
                 else:  # hybrid mode
-                    from .hybrid_search import SearchConfig
-
                     config = SearchConfig.medium_hardware()  # Balanced default
 
                 # Perform the search
@@ -423,6 +437,10 @@ The search engine is not initialized. This usually means:
 
             This search uses AI embeddings to understand meaning and context.
             """
+            # Lazy load search engine when first tool is called
+            if not self._search_engine_initialized:
+                self._initialize_search_engine()
+
             if not self.search_engine:
                 return """❌ **Search Not Available**
 
@@ -437,8 +455,9 @@ The search engine is not initialized. This usually means:
 
             try:
                 from .hybrid_search import SearchConfig
+
                 config = SearchConfig(enable_faiss=True, enable_flashrank=False)
-                
+
                 response = self.search_engine.search(
                     query=None,
                     semantic_query=semantic_query,
@@ -447,7 +466,7 @@ The search engine is not initialized. This usually means:
                     config=config,
                     explain_results=True,
                 )
-                
+
                 if not response.results:
                     return f"""🔍 **No Results Found**
 
@@ -461,7 +480,7 @@ The search engine is not initialized. This usually means:
 - Check if the functionality exists in your IFS Cloud version"""
 
                 return response.formatted_results
-                
+
             except Exception as e:
                 logger.error(f"Semantic search failed: {e}")
                 return f"❌ **Search Error:** {str(e)}"
@@ -489,6 +508,10 @@ The search engine is not initialized. This usually means:
 
             This search uses BM25 text matching for precise results.
             """
+            # Lazy load search engine when first tool is called
+            if not self._search_engine_initialized:
+                self._initialize_search_engine()
+
             if not self.search_engine:
                 return """❌ **Search Not Available**
 
@@ -503,8 +526,9 @@ The search engine is not initialized. This usually means:
 
             try:
                 from .hybrid_search import SearchConfig
+
                 config = SearchConfig(enable_faiss=False, enable_flashrank=False)
-                
+
                 response = self.search_engine.search(
                     query=None,
                     semantic_query="",
@@ -513,7 +537,7 @@ The search engine is not initialized. This usually means:
                     config=config,
                     explain_results=True,
                 )
-                
+
                 if not response.results:
                     return f"""🔍 **No Results Found**
 
@@ -527,7 +551,7 @@ The search engine is not initialized. This usually means:
 - Use partial names or wildcards if available"""
 
                 return response.formatted_results
-                
+
             except Exception as e:
                 logger.error(f"Lexical search failed: {e}")
                 return f"❌ **Search Error:** {str(e)}"
