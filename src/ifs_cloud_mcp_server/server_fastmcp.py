@@ -423,14 +423,48 @@ The search engine is not initialized. This usually means:
 
             This search uses AI embeddings to understand meaning and context.
             """
-            return await search_ifs_codebase(
-                query=None,
-                semantic_query=semantic_query,
-                lexical_query="",
-                search_mode="semantic",
-                max_results=max_results,
-                explain_results=True,
-            )
+            if not self.search_engine:
+                return """❌ **Search Not Available**
+
+The search engine is not initialized. This usually means:
+1. No embeddings have been created for this version
+2. The analysis hasn't been completed yet
+
+**To fix this:**
+1. Ensure you've run: `uv run python -m src.ifs_cloud_mcp_server.main analyze --version <version>`
+2. Create embeddings: `uv run python -m src.ifs_cloud_mcp_server.main embed --version <version>`
+3. Restart the MCP server"""
+
+            try:
+                from .hybrid_search import SearchConfig
+                config = SearchConfig(enable_faiss=True, enable_flashrank=False)
+                
+                response = self.search_engine.search(
+                    query=None,
+                    semantic_query=semantic_query,
+                    lexical_query="",
+                    top_k=max_results,
+                    config=config,
+                    explain_results=True,
+                )
+                
+                if not response.results:
+                    return f"""🔍 **No Results Found**
+
+**Query:** {semantic_query}
+**Search Mode:** semantic
+**Search Time:** {response.search_time:.3f}s
+
+**Suggestions:**
+- Try different search terms or synonyms
+- Use broader or more specific terms
+- Check if the functionality exists in your IFS Cloud version"""
+
+                return response.formatted_results
+                
+            except Exception as e:
+                logger.error(f"Semantic search failed: {e}")
+                return f"❌ **Search Error:** {str(e)}"
 
         @self.mcp.tool()
         async def search_ifs_lexical(
@@ -455,14 +489,48 @@ The search engine is not initialized. This usually means:
 
             This search uses BM25 text matching for precise results.
             """
-            return await search_ifs_codebase(
-                query=None,
-                semantic_query="",
-                lexical_query=lexical_query,
-                search_mode="lexical",
-                max_results=max_results,
-                explain_results=True,
-            )
+            if not self.search_engine:
+                return """❌ **Search Not Available**
+
+The search engine is not initialized. This usually means:
+1. No embeddings have been created for this version
+2. The analysis hasn't been completed yet
+
+**To fix this:**
+1. Ensure you've run: `uv run python -m src.ifs_cloud_mcp_server.main analyze --version <version>`
+2. Create embeddings: `uv run python -m src.ifs_cloud_mcp_server.main embed --version <version>`
+3. Restart the MCP server"""
+
+            try:
+                from .hybrid_search import SearchConfig
+                config = SearchConfig(enable_faiss=False, enable_flashrank=False)
+                
+                response = self.search_engine.search(
+                    query=None,
+                    semantic_query="",
+                    lexical_query=lexical_query,
+                    top_k=max_results,
+                    config=config,
+                    explain_results=True,
+                )
+                
+                if not response.results:
+                    return f"""🔍 **No Results Found**
+
+**Query:** {lexical_query}
+**Search Mode:** lexical
+**Search Time:** {response.search_time:.3f}s
+
+**Suggestions:**
+- Check spelling of API names or function names
+- Try variations of the search term
+- Use partial names or wildcards if available"""
+
+                return response.formatted_results
+                
+            except Exception as e:
+                logger.error(f"Lexical search failed: {e}")
+                return f"❌ **Search Error:** {str(e)}"
 
     def run(self, transport_type: str = "stdio", **kwargs):
         """Run the MCP server.
