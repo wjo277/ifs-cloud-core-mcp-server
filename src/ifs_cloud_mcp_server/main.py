@@ -10,6 +10,8 @@ from .directory_utils import (
     resolve_version_to_work_directory,
     get_version_base_directory,
     get_version_analysis_file,
+    get_version_bm25s_directory,
+    get_version_faiss_directory,
 )
 
 # Lazy import: from .server_fastmcp import IFSCloudMCPServer
@@ -458,10 +460,16 @@ def handle_list_command(args) -> int:
         if versions_dir.exists():
             for version_dir in versions_dir.iterdir():
                 if version_dir.is_dir():
+                    version = version_dir.name
+
+                    # Use directory_utils functions for proper paths
+                    bm25s_dir = get_version_bm25s_directory(version)
+                    faiss_dir = get_version_faiss_directory(version)
+                    analysis_file = get_version_analysis_file(version)
+                    pagerank_file = get_version_base_directory(version) / "ranked.jsonl"
+
+                    # Check legacy index structure
                     index_path = indexes_dir / version_dir.name
-                    analysis_path = (
-                        version_dir / "analysis" / "comprehensive_plsql_analysis.json"
-                    )
 
                     # Get file count
                     file_count = 0
@@ -476,18 +484,37 @@ def handle_list_command(args) -> int:
                     except:
                         created_str = "Unknown"
 
-                    # Check if analysis data exists (modern approach) or index exists (legacy)
-                    has_analysis = analysis_path.exists()
-                    has_legacy_index = index_path.exists()
+                    # Check readiness status
+                    has_analysis = analysis_file.exists()
+                    has_bm25s = bm25s_dir.exists() and any(bm25s_dir.glob("*"))
+                    has_faiss = faiss_dir.exists() and any(faiss_dir.glob("*"))
+                    has_pagerank = pagerank_file.exists()
+
+                    # Version is ready if it has core search components or legacy index
+                    # For downloaded indexes, we don't require full analysis
+                    has_hybrid_search = (
+                        has_bm25s and has_pagerank
+                    )  # Core hybrid search components
+                    has_full_analysis = (
+                        has_analysis and has_hybrid_search
+                    )  # Complete analysis + search
+                    is_ready = has_hybrid_search or index_path.exists()
 
                     version_info = {
                         "version": version_dir.name,
                         "extract_path": str(version_dir),
-                        "index_path": str(index_path),
-                        "analysis_path": str(analysis_path),
-                        "has_index": has_legacy_index,
+                        "index_path": str(index_path),  # Legacy path for compatibility
+                        "analysis_path": str(analysis_file),
+                        "bm25s_path": str(bm25s_dir),
+                        "faiss_path": str(faiss_dir),
+                        "pagerank_path": str(pagerank_file),
                         "has_analysis": has_analysis,
-                        "is_ready": has_analysis or has_legacy_index,
+                        "has_bm25s": has_bm25s,
+                        "has_faiss": has_faiss,
+                        "has_pagerank": has_pagerank,
+                        "has_hybrid_search": has_hybrid_search,
+                        "has_full_analysis": has_full_analysis,
+                        "is_ready": is_ready,
                         "file_count": file_count,
                         "created": created_str,
                     }
@@ -512,10 +539,12 @@ def handle_list_command(args) -> int:
                 print("Available IFS Cloud versions:")
                 print("")
                 for v in versions:
-                    if v["has_analysis"]:
-                        status = "✅ Analyzed"
-                    elif v["has_index"]:
-                        status = "🔍 Legacy indexed"
+                    if v["has_full_analysis"]:
+                        status = "✅ Ready (Full Analysis + Hybrid Search)"
+                    elif v["has_hybrid_search"]:
+                        status = "✅ Ready (Hybrid Search)"
+                    elif Path(v["index_path"]).exists():
+                        status = "✅ Ready (Legacy Index)"
                     else:
                         status = "⚠️  Not analyzed"
 
@@ -523,6 +552,22 @@ def handle_list_command(args) -> int:
                     print(f"   Status: {status}")
                     print(f"   Files: {v['file_count']:,}")
                     print(f"   Created: {v['created']}")
+
+                    # Show detailed component status
+                    components = []
+                    if v["has_analysis"]:
+                        components.append("Analysis")
+                    if v["has_bm25s"]:
+                        components.append("BM25s")
+                    if v["has_faiss"]:
+                        components.append("FAISS")
+                    if v["has_pagerank"]:
+                        components.append("PageRank")
+                    if Path(v["index_path"]).exists():
+                        components.append("Legacy-Index")
+
+                    if components:
+                        print(f"   Components: {', '.join(components)}")
 
                     if v["is_ready"]:
                         print(

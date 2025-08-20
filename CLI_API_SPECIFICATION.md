@@ -84,41 +84,45 @@ python -m src.ifs_cloud_mcp_server.main list [OPTIONS]
 **Human-Readable Output:**
 
 ```
-📦 Available IFS Cloud Versions:
+Available IFS Cloud versions:
 
-25.1.0
-  📁 Directory: C:\Users\...\ifs_cloud_mcp_server\versions\25.1.0
-  📊 Analysis: ✅ Complete (15,432 files analyzed)
-  🔍 BM25S Index: ✅ Available (9,750 documents)
-  🧠 FAISS Index: ✅ Available (9,733 embeddings)
-  📅 Last Updated: 2025-01-15 14:30:22
+� 25.1.0
+   Status: ✅ Ready (Hybrid Search)
+   Files: 42,603
+   Created: 2025-08-20 06:12:56
+   Components: BM25s, FAISS, PageRank
+   Command: python -m src.ifs_cloud_mcp_server.main server --version "25.1.0"
 
-24.2.1
-  📁 Directory: C:\Users\...\ifs_cloud_mcp_server\versions\24.2.1
-  📊 Analysis: ❌ Not analyzed
-  🔍 BM25S Index: ❌ Not available
-  🧠 FAISS Index: ❌ Not available
+📦 24.2.1
+   Status: ⚠️  Not analyzed
+   Files: 38,421
+   Created: 2025-08-15 10:15:30
+   To analyze: python -m src.ifs_cloud_mcp_server.main analyze --version "24.2.1"
 ```
 
 **JSON Output:**
 
 ```json
-{
-  "versions": [
-    {
-      "version": "25.1.0",
-      "directory": "/path/to/versions/25.1.0",
-      "analyzed": true,
-      "analysis_file_size": 52428800,
-      "file_count": 15432,
-      "bm25s_available": true,
-      "bm25s_document_count": 9750,
-      "faiss_available": true,
-      "faiss_embedding_count": 9733,
-      "last_updated": "2025-01-15T14:30:22Z"
-    }
-  ]
-}
+[
+  {
+    "version": "25.1.0",
+    "extract_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0",
+    "index_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\indexes\\25.1.0",
+    "analysis_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\analysis\\comprehensive_plsql_analysis.json",
+    "bm25s_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\bm25s",
+    "faiss_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\faiss",
+    "pagerank_path": "C:\\Users\\SC-23431\\AppData\\Roaming\\ifs_cloud_mcp_server\\versions\\25.1.0\\ranked.jsonl",
+    "has_analysis": false,
+    "has_bm25s": true,
+    "has_faiss": true,
+    "has_pagerank": true,
+    "has_hybrid_search": true,
+    "has_full_analysis": false,
+    "is_ready": true,
+    "file_count": 42603,
+    "created": "2025-08-20 06:12:56"
+  }
+]
 ```
 
 ---
@@ -576,17 +580,26 @@ const handleCLIError = (command: string, result: CommandResult): CLIError => {
 ```typescript
 interface Version {
   version: string;
-  directory: string;
-  analyzed: boolean;
-  bm25s_available: boolean;
-  faiss_available: boolean;
-  file_count?: number;
-  last_updated: string;
+  extract_path: string;
+  index_path: string;
+  analysis_path: string;
+  bm25s_path: string;
+  faiss_path: string;
+  pagerank_path: string;
+  has_analysis: boolean;
+  has_bm25s: boolean;
+  has_faiss: boolean;
+  has_pagerank: boolean;
+  has_hybrid_search: boolean;
+  has_full_analysis: boolean;
+  is_ready: boolean;
+  file_count: number;
+  created: string;
 }
 
 const listVersions = async (): Promise<Version[]> => {
   const result = await executeCommand("list", ["--json"]);
-  return JSON.parse(result.stdout).versions;
+  return JSON.parse(result.stdout); // Note: returns array directly, not .versions
 };
 ```
 
