@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Any, Tuple
 import hashlib
 import pickle
-from tqdm import tqdm
 
 # Search engine imports - using lazy loading to avoid CLI slowdown
 try:
@@ -526,18 +525,18 @@ class BuiltInPageRankAnalyzer:
         # Extract file information
         logger.info("📊 Extracting file metadata...")
         files_info = []
-        
+
         # Minimal progress - just dots
         total_files = len(plsql_files)
         for i, file_path in enumerate(plsql_files):
             info = self.extract_file_info(file_path)
             if info:
                 files_info.append(info)
-            
+
             # Minimal progress - just show a dot every few files
             if i % 10 == 0 or i == total_files - 1:
-                print(f"\r{i+1}/{total_files} files", end='', flush=True)
-        
+                print(f"\r{i+1}/{total_files} files", end="", flush=True)
+
         print()  # Newline when done
 
         logger.info(f"Successfully processed {len(files_info)} files")
@@ -586,18 +585,18 @@ class BuiltInPageRankAnalyzer:
         # Extract file information
         logger.info("📊 Extracting file metadata...")
         files_info = []
-        
+
         # Minimal progress - just dots
         total_files = len(plsql_files)
         for i, file_path in enumerate(plsql_files):
             info = self.extract_file_info(file_path)
             if info:
                 files_info.append(info)
-            
+
             # Minimal progress - just show a dot every few files
             if i % 10 == 0 or i == total_files - 1:
-                print(f"\r{i+1}/{total_files} files", end='', flush=True)
-        
+                print(f"\r{i+1}/{total_files} files", end="", flush=True)
+
         print()  # Newline when done
 
         logger.info(f"Successfully processed {len(files_info)} files")
@@ -660,7 +659,7 @@ class BuiltInPageRankAnalyzer:
         }
 
         return {
-            "analysis_metadata": analysis_metadata, 
+            "analysis_metadata": analysis_metadata,
             "file_rankings": file_rankings,
             "reference_graph": {
                 k: list(v) for k, v in reference_graph.items()
@@ -1621,7 +1620,9 @@ class BM25SIndexer:
                 corpus_tokens.append(stemmed_tokens)
 
                 if (i + 1) % 1000 == 0:
-                    logger.debug(f"Processed {i + 1}/{len(self.corpus_texts)} documents")
+                    logger.debug(
+                        f"Processed {i + 1}/{len(self.corpus_texts)} documents"
+                    )
 
             # Build BM25S index with our preprocessed tokens
             logger.info("Building BM25S index...")
@@ -2933,12 +2934,14 @@ class AnalysisEngine:
 
     def _load_or_generate_analysis_data(self) -> List[FileMetadata]:
         """Load existing analysis or generate simplified analysis if missing."""
-        
+
         # If force flag is set, skip all existing analysis and return empty rankings
         if self.force:
-            logger.info("� Force flag enabled, skipping existing analysis completely...")
+            logger.info(
+                "� Force flag enabled, skipping existing analysis completely..."
+            )
             return []
-        
+
         # Load existing analysis if available and force is not set
         if self.analysis_file.exists():
             logger.info(f"� Loading existing analysis from {self.analysis_file}")
@@ -2953,8 +2956,10 @@ class AnalysisEngine:
 
         # Don't automatically generate analysis - let the caller decide
         logger.info(f"📊 Analysis file not found at {self.analysis_file}")
-        logger.info(f"   Use 'analyze' command to generate analysis or 'embed' to run full pipeline")
-        
+        logger.info(
+            f"   Use 'analyze' command to generate analysis or 'embed' to run full pipeline"
+        )
+
         # Return empty rankings - caller can generate analysis if needed
         return []
 
@@ -3070,12 +3075,14 @@ class AnalysisEngine:
 
     def extract_metadata_only(self) -> Dict[str, Any]:
         """Extract file metadata and API calls without PageRank calculation."""
-        
+
         # If file_rankings is empty (e.g., due to force flag), process files directly
         if not self.file_rankings:
-            logger.info("🔍 No pre-processed file rankings found, processing files directly...")
+            logger.info(
+                "🔍 No pre-processed file rankings found, processing files directly..."
+            )
             return self.analyzer.extract_metadata_only()
-        
+
         logger.info("🔍 Using pre-loaded file metadata...")
 
         # Use the already processed file rankings from initialization
@@ -3147,7 +3154,11 @@ class AnalysisEngine:
     def _print_progress(self, progress: ProcessingProgress) -> None:
         """Update progress with minimal output."""
         # Simple counter - no wrapping issues
-        print(f"\rProcessing: {progress.files_processed}/{progress.total_files} (✅{progress.files_successful} ❌{progress.files_failed})", end='', flush=True)
+        print(
+            f"\rProcessing: {progress.files_processed}/{progress.total_files} (✅{progress.files_successful} ❌{progress.files_failed})",
+            end="",
+            flush=True,
+        )
 
     def _close_progress_bar(self) -> None:
         """Close the progress bar and print a newline."""
