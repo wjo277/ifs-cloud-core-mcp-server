@@ -648,11 +648,14 @@ def handle_server_command(args) -> int:
         # Use directory utilities to get the version base directory
         from .directory_utils import (
             get_version_base_directory,
-            get_version_analysis_file,
+            get_version_bm25s_directory,
+            get_version_faiss_directory,
         )
 
         version_base_dir = get_version_base_directory(args.version)
-        analysis_file = get_version_analysis_file(args.version)
+        bm25s_dir = get_version_bm25s_directory(args.version)
+        faiss_dir = get_version_faiss_directory(args.version)
+        pagerank_file = version_base_dir / "ranked.jsonl"
 
         logging.info(f"Using IFS Cloud version: {args.version}")
         logging.info(f"Version directory: {version_base_dir}")
@@ -663,10 +666,14 @@ def handle_server_command(args) -> int:
                 f"Version '{args.version}' not found. Available versions can be listed with: python -m src.ifs_cloud_mcp_server.main list"
             )
 
-        # Check if analysis data exists (more flexible than requiring indexes)
-        if not analysis_file.exists():
+        # Check if hybrid search components exist (server only needs these)
+        has_bm25s = bm25s_dir.exists() and any(bm25s_dir.glob("*"))
+        has_faiss = faiss_dir.exists() and any(faiss_dir.glob("*"))
+        has_pagerank = pagerank_file.exists()
+
+        if not (has_bm25s and has_pagerank):
             raise ValueError(
-                f"Version '{args.version}' found but not analyzed. Please run analysis with: python -m src.ifs_cloud_mcp_server.main analyze --version {args.version}"
+                f"Version '{args.version}' found but missing search indexes. Please run: python -m src.ifs_cloud_mcp_server.main download --version {args.version}"
             )
 
         # Lazy import to avoid CLI slowdown
