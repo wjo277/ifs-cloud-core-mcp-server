@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ifs-cloud-mcp-server"
 version = "0.1.0"
-description = "MCP Server for IFS Cloud with Tantivy search engine integration"
+description = "MCP Server for IFS Cloud with hybrid search (BM25S + FAISS) integration"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -22,38 +22,16 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "tantivy>=0.20.0",
     "mcp>=1.0.0",
-    "aiofiles>=23.0.0",
-    "pydantic>=2.0.0",
-    "asyncio-mqtt>=0.16.0",
-    "typing-extensions>=4.0.0",
     "fastmcp>=2.11.3",
-    "fastapi>=0.116.1",
-    "uvicorn>=0.35.0",
-    "jinja2>=3.1.6",
-    "python-multipart>=0.0.20",
     "requests>=2.32.4",
-    "rapidfuzz>=3.13.0",
-    "sqlalchemy>=2.0.43",
-    "oracledb>=3.3.0",
-    "scikit-learn>=1.7.1",
     "numpy>=2.2.6",
     "transformers>=4.55.2",
-    "datasets>=4.0.0",
-    "accelerate>=0.26.0",
-    "fastai>=2.8.3",
     "faiss-cpu>=1.12.0",
     "bm25s>=0.2.6",
     "flashrank>=0.2.9",
-    "ollama>=0.5.3",
-    "nvidia-ml-py>=12.575.51",
-    "aiohttp>=3.12.15",
     "tiktoken>=0.11.0",
     "nltk>=3.9.1",
-    "platformdirs>=4.3.8",
-    "numba>=0.61.2",
-    "packaging>=25.0",
 ]
 
 [project.optional-dependencies]
@@ -65,7 +43,13 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
 ]
-gpu = [
+gpu129 = [
+    "torch>=2.8.0"
+]
+gpu128 = [
+    "torch>=2.8.0"
+]
+gpu126 = [
     "torch>=2.8.0"
 ]
 cpu = [
@@ -76,19 +60,33 @@ cpu = [
 conflicts = [
   [
     { extra = "cpu" },
-    { extra = "gpu" },
+    { extra = "gpu129" },
+    { extra = "gpu128" },
+    { extra = "gpu126" },
   ],
 ]
 
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cu129",  extra = "gpu" },
+    { index = "pytorch-cu129",  extra = "gpu129" },
+    { index = "pytorch-cu128",  extra = "gpu128" },
+    { index = "pytorch-cu126",  extra = "gpu126" },
     { index = "pytorch-cpu",  extra = "cpu" },
 ]
 
 [[tool.uv.index]]
 name = "pytorch-cu129"
 url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [[tool.uv.index]]
@@ -141,7 +139,4 @@ python_functions = "test_*"
 asyncio_mode = "auto"
 
 [dependency-groups]
-dev = [
-    "ollama>=0.5.3",
-    "pynvml>=12.0.0",
-]
+# Currently no development-specific dependencies needed beyond core dependencies
