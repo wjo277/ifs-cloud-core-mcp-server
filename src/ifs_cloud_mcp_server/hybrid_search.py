@@ -824,12 +824,15 @@ class HybridSearchEngine:
     ) -> str:
         """Generate contextual snippet from file content."""
         try:
-            if file_path in self._document_cache:
-                content = self._document_cache[file_path]
+            # Convert relative path to absolute path
+            resolved_path = self._resolve_file_path(file_path)
+
+            if resolved_path in self._document_cache:
+                content = self._document_cache[resolved_path]
             else:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                with open(resolved_path, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
-                self._document_cache[file_path] = content
+                self._document_cache[resolved_path] = content
 
             # Find best snippet containing query terms
             query_words = query.lower().split()
@@ -854,6 +857,27 @@ class HybridSearchEngine:
         except Exception as e:
             logger.warning(f"Failed to generate snippet for {file_path}: {e}")
             return "No preview available"
+
+    def _resolve_file_path(self, file_path: str) -> str:
+        """Resolve a relative file path to absolute path in the version directory."""
+        # Convert the file path to use forward slashes for consistency
+        normalized_path = file_path.replace("\\", "/")
+
+        # Remove _work prefix if present and replace with source
+        if normalized_path.startswith("_work/"):
+            # Transform _work/component/source/... to source/component/source/...
+            # The structure is: _work/order/source/order/database/file.plsql
+            # Should become: source/order/source/order/database/file.plsql
+            resolved_relative_path = normalized_path.replace("_work/", "source/", 1)
+        else:
+            # If it doesn't start with _work, assume it's already correctly formatted
+            resolved_relative_path = normalized_path
+
+        # Combine with version directory
+        version_dir = self.search_indexes_dir  # This is the version directory
+        resolved_path = version_dir / resolved_relative_path
+
+        return str(resolved_path)
 
     def _add_explanations(
         self, results: List[SearchResult], query: str, analysis: Dict
