@@ -81,7 +81,15 @@ class IFSCloudMCPServer:
 
                 # Import heavy modules only when needed
                 logger.info("🔍 Importing HybridSearchEngine...")
-                from .hybrid_search import HybridSearchEngine
+                try:
+                    from .hybrid_search import HybridSearchEngine
+
+                    logger.info("✅ HybridSearchEngine imported successfully")
+                except Exception as import_error:
+                    logger.error(
+                        f"❌ Failed to import HybridSearchEngine: {import_error}"
+                    )
+                    raise
 
                 logger.info("🔍 Creating HybridSearchEngine instance...")
                 self.search_engine = HybridSearchEngine(faiss_dir)

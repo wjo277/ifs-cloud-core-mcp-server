@@ -24,7 +24,9 @@ from enum import Enum
 
 # Import numpy lazily to avoid CLI slowdown
 # import numpy as np  # Moved to lazy loading
-from flashrank import Ranker, RerankRequest
+
+# Import FlashRank lazily to avoid CLI slowdown
+# from flashrank import Ranker, RerankRequest  # Moved to lazy loading
 
 from .analysis_engine import (
     BM25SIndexer,
@@ -320,6 +322,8 @@ class HybridSearchEngine:
             # Initialize FlashRank
             logger.info("🔍 Initializing FlashRank...")
             logger.info(f"🔍 Loading FlashRank model: {self.ranker_model}")
+            from flashrank import Ranker
+
             self.ranker = Ranker(model_name=self.ranker_model)
             logger.info("✅ FlashRank initialized successfully")
 
@@ -791,6 +795,8 @@ class HybridSearchEngine:
                 )
 
             # Create rerank request
+            from flashrank import RerankRequest
+
             rerank_request = RerankRequest(query=query, passages=passages)
 
             # Apply FlashRank
