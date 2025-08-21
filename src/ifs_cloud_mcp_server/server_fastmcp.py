@@ -5,6 +5,7 @@ Clean implementation with focused IFS development guidance tool.
 """
 
 import logging
+import threading
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -20,19 +21,17 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastMCP) -> AsyncIterator[None]:
     """Lifespan context manager for FastMCP server.
 
-    This runs during server startup (after initialization handshake)
-    and shutdown. Perfect for post-initialization logic.
+    This runs during server startup and shutdown.
     """
-    # STARTUP: This runs after the server starts and client connects
-    logger.info("🚀 FastMCP Server startup - client connected and initialized!")
-
     # You can access the server instance here
     if hasattr(app, "_server_instance"):
         server_instance = app._server_instance
-        logger.info("🔧 Performing post-initialization setup...")
 
-        # Example: Pre-warm the search engine
-        server_instance._perform_post_initialization_setup()
+        # Pre-warm the search engine after 10 seconds, just enough time to allow the MCP client to connect and perform the initialization handshake
+        timer = threading.Timer(
+            10.0, server_instance._perform_post_initialization_setup
+        )
+        timer.start()
 
     try:
         # Server is now running and serving requests
