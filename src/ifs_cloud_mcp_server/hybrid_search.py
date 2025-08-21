@@ -254,7 +254,12 @@ class HybridSearchEngine:
         self._np_loaded = False
 
         # Initialize search components
-        self._initialize_search_components()
+        initialization_success = self._initialize_search_components()
+        if not initialization_success:
+            logger.error(
+                "❌ Failed to initialize search engine - some components may not work"
+            )
+            # Don't raise exception, just log the error so server can still start
 
     def _ensure_numpy_loaded(self):
         """Lazily load numpy when needed."""
@@ -273,43 +278,59 @@ class HybridSearchEngine:
     def _initialize_search_components(self) -> bool:
         """Initialize BM25S, FAISS, and FlashRank components."""
         try:
+            logger.info("🔍 Starting search components initialization...")
+
             # Get the version directory (parent of checkpoint_dir)
             version_dir = self.checkpoint_dir.parent
+            logger.info(f"🔍 Version directory: {version_dir}")
 
             # Set up specific directories for each component
             bm25s_dir = version_dir / "bm25s"
             faiss_dir = version_dir / "faiss"
+            logger.info(f"🔍 BM25S directory: {bm25s_dir}")
+            logger.info(f"🔍 FAISS directory: {faiss_dir}")
 
             # Initialize BM25S indexer with specific directory
             logger.info("🔍 Initializing BM25S search...")
             self.bm25_indexer = BM25SIndexer(bm25s_dir)
+            logger.info("🔍 Loading BM25S index...")
             if not self.bm25_indexer.load_existing_index():
                 logger.error("❌ Failed to load BM25S index")
                 return False
+            logger.info("✅ BM25S index loaded successfully")
 
             # Initialize FAISS manager with specific directory
             logger.info("🔍 Initializing FAISS search...")
             self.faiss_manager = FAISSIndexManager(faiss_dir)
+            logger.info("🔍 Loading FAISS index...")
             if not self.faiss_manager.load_existing_index():
                 logger.error("❌ Failed to load FAISS index")
                 return False
+            logger.info("✅ FAISS index loaded successfully")
 
             # Initialize embedding generator for query embeddings
             logger.info("🔍 Initializing embedding generator...")
             self.embedding_generator = BGEM3EmbeddingGenerator()
+            logger.info("🔍 Loading embedding model (this may take a while)...")
             if not self.embedding_generator.initialize_model():
                 logger.error("❌ Failed to initialize embedding model")
                 return False
+            logger.info("✅ Embedding model loaded successfully")
 
             # Initialize FlashRank
             logger.info("🔍 Initializing FlashRank...")
+            logger.info(f"🔍 Loading FlashRank model: {self.ranker_model}")
             self.ranker = Ranker(model_name=self.ranker_model)
+            logger.info("✅ FlashRank initialized successfully")
 
             logger.info("✅ Hybrid search engine initialized successfully!")
             return True
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize search components: {e}")
+            import traceback
+
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return False
 
     def search(

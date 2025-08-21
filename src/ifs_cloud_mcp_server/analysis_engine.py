@@ -734,21 +734,35 @@ class BGEM3EmbeddingGenerator:
 
         try:
             # Set device
+            logger.info("🔍 Setting up device for BGE-M3...")
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             logger.info(f"Using device: {self.device}")
 
             # Load BGE-M3 tokenizer and model
-            logger.info(f"Loading BGE-M3 model: {self.model_name}")
+            logger.info(f"🔍 Loading BGE-M3 tokenizer: {self.model_name}")
+            logger.info(
+                "⏳ This may take several minutes on first run (downloading model files)..."
+            )
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            logger.info("✅ BGE-M3 tokenizer loaded successfully")
+
+            logger.info(f"🔍 Loading BGE-M3 model: {self.model_name}")
+            logger.info("⏳ Loading model weights (this is the slowest step)...")
             self.model = AutoModel.from_pretrained(self.model_name)
+            logger.info("✅ BGE-M3 model loaded successfully")
+
+            logger.info("🔍 Moving model to device...")
             self.model.to(self.device)
             self.model.eval()  # Set to evaluation mode
+            logger.info("✅ BGE-M3 model setup complete")
 
-            logger.info("✅ BGE-M3 model loaded successfully")
             return True
 
         except Exception as e:
             logger.error(f"Failed to initialize BGE-M3 model: {e}")
+            import traceback
+
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     def generate_embedding(self, text: str) -> Optional[List[float]]:

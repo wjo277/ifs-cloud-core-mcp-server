@@ -58,20 +58,38 @@ class IFSCloudMCPServer:
         self._search_engine_loading = True
 
         try:
+            import time
+
+            start_time = time.time()
+
             # The version_path now points directly to versions/version_name
             version_dir = self.version_path
+            logger.info(f"🔍 Checking version directory: {version_dir}")
 
             # Look for the faiss directory which contains the embeddings
             faiss_dir = version_dir / "faiss"
+            logger.info(f"🔍 Looking for FAISS directory: {faiss_dir}")
 
             if faiss_dir.exists():
                 logger.info("🔍 Initializing search engine (lazy loading)...")
 
+                # Check what files exist in the faiss directory
+                faiss_files = list(faiss_dir.glob("*"))
+                logger.info(
+                    f"🔍 FAISS directory contains {len(faiss_files)} files: {[f.name for f in faiss_files]}"
+                )
+
                 # Import heavy modules only when needed
+                logger.info("🔍 Importing HybridSearchEngine...")
                 from .hybrid_search import HybridSearchEngine
 
+                logger.info("🔍 Creating HybridSearchEngine instance...")
                 self.search_engine = HybridSearchEngine(faiss_dir)
-                logger.info("✅ Search engine initialized successfully")
+
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"✅ Search engine initialized successfully in {elapsed:.2f}s"
+                )
             else:
                 logger.warning(
                     f"⚠️  No FAISS embeddings found in {faiss_dir}. Search functionality will be limited."
