@@ -6,12 +6,40 @@ Clean implementation with focused IFS development guidance tool.
 
 import logging
 from pathlib import Path
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastmcp import FastMCP
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastMCP) -> AsyncIterator[None]:
+    """Lifespan context manager for FastMCP server.
+
+    This runs during server startup (after initialization handshake)
+    and shutdown. Perfect for post-initialization logic.
+    """
+    # STARTUP: This runs after the server starts and client connects
+    logger.info("🚀 FastMCP Server startup - client connected and initialized!")
+
+    # You can access the server instance here
+    if hasattr(app, "_server_instance"):
+        server_instance = app._server_instance
+        logger.info("🔧 Performing post-initialization setup...")
+
+        # Example: Pre-warm the search engine
+        server_instance._perform_post_initialization_setup()
+
+    try:
+        # Server is now running and serving requests
+        yield
+    finally:
+        # SHUTDOWN: This runs when the server shuts down
+        logger.info("🛑 FastMCP Server shutting down...")
 
 
 class IFSCloudMCPServer:
@@ -26,7 +54,10 @@ class IFSCloudMCPServer:
             version_path: Path to the version directory containing analysis and search indexes
             name: Name for the MCP server
         """
-        self.mcp = FastMCP(name)
+        self.mcp = FastMCP(name, lifespan=lifespan)
+
+        # Store reference for lifespan access
+        self.mcp._server_instance = self
 
         # Initialize paths
         if version_path:
@@ -109,6 +140,33 @@ class IFSCloudMCPServer:
         finally:
             self._search_engine_initialized = True
             self._search_engine_loading = False
+
+    def _perform_post_initialization_setup(self):
+        """Perform any setup logic after client connection and initialization handshake.
+
+        This is called from the lifespan context manager after the client has connected
+        and completed the MCP initialize handshake.
+        """
+        logger.info("🔧 Running post-initialization setup...")
+
+        # Example 1: Pre-warm the search engine if embeddings are available
+        try:
+            logger.info("🚀 Pre-warming search engine after client initialization...")
+            self._initialize_search_engine()
+        except Exception as e:
+            logger.warning(f"⚠️ Could not pre-warm search engine: {e}")
+
+        # Example 2: Log system information
+        logger.info(f"📊 Server ready with version path: {self.version_path}")
+
+        # Example 3: You can add any other post-initialization logic here
+        # - Database connections
+        # - Cache warming
+        # - Background task startup
+        # - Metric collection setup
+        # etc.
+
+        logger.info("✅ Post-initialization setup completed!")
 
     def _register_tools(self):
         """Register MCP tools for IFS Cloud development guidance."""
