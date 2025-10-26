@@ -76,7 +76,9 @@ def resolve_version_to_work_directory(version: str) -> Path:
         logger.debug(f"Searching for IFS work directory in: {current_path}")
 
         # First check if current directory contains the required components
-        if (current_path / "fndbas").exists() and (current_path / "accrul").exists():
+        #wjo277: angepasst: in der source structur gibt es 4 ordner: model, source, template und test
+        # if (current_path / "fndbas").exists() and (current_path / "accrul").exists():
+        if (current_path / "model").exists() and (current_path / "source").exists():
             logger.info(f"Found IFS work directory: {current_path}")
             return current_path
 

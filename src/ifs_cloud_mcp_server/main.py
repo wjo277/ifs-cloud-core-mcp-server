@@ -49,7 +49,9 @@ def get_version_from_zip(zip_path: Path) -> str:
 
     with zipfile.ZipFile(zip_path, "r") as zip_ref:
         # Look for version.txt in the expected location
-        version_file_path = "checkout/fndbas/source/version.txt"
+        #wjo277: file im Zipfile zusätzlich eingefügt
+        #version_file_path = "checkout/fndbas/source/version.txt"
+        version_file_path = "build-home/source/version.txt"
 
         if version_file_path not in zip_ref.namelist():
             raise ValueError(f"Version file not found: {version_file_path}")
