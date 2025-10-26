@@ -671,7 +671,8 @@ class BuiltInPageRankAnalyzer:
 class FileMetadata:
     """Metadata for a single file to be processed."""
 
-    rank: int
+    #wjo277 - removed rank from definition
+    #rank: int
     file_path: str
     relative_path: str
     file_name: str
@@ -986,6 +987,9 @@ class BM25SIndexer:
 
     def __init__(self, bm25s_dir: Path):
         self.bm25s_dir = Path(bm25s_dir)
+        #wjo277 - set work_dir to parent of bm25s_dir
+        self.work_dir = self.bm25s_dir.parent
+
         self.bm25s_dir.mkdir(parents=True, exist_ok=True)
 
         # BM25S index files
@@ -1470,7 +1474,8 @@ class BM25SIndexer:
             # Preserve important identifiers (don't stem these)
             f"filename:{metadata.file_name.lower()}",
             f"apiname:{metadata.api_name.lower()}",
-            f"rank:{metadata.rank}",
+            #wjo277 - removed rank from structured parts
+            #f"rank:{metadata.rank}",
         ]
 
         # Add processed content
@@ -1591,7 +1596,8 @@ class BM25SIndexer:
                 "relative_path": relative_path,
                 "file_name": result.file_metadata.file_name,
                 "api_name": result.file_metadata.api_name,
-                "rank": result.file_metadata.rank,
+                #"rank": result.file_metadata.rank,
+                #wjo277 - removed rank from metadata
                 "content_hash": result.content_hash,
                 "has_full_content": full_content is not None,
                 "processed_tokens": len(bm25_text.split()),
@@ -1681,7 +1687,8 @@ class BM25SIndexer:
                     "relative_path": meta["relative_path"],
                     "file_name": meta["file_name"],
                     "api_name": meta["api_name"],
-                    "rank": meta["rank"],
+                    #wjo277 - removed rank from mapping
+                    #"rank": meta["rank"],
                 }
 
             with open(self.doc_mapping_file, "w") as f:
@@ -2495,6 +2502,8 @@ class AnalysisEngine:
         self,
         work_dir: Path,
         analysis_file: Path,
+        #wjo277: added pagerank_file
+       # pagerank_file: Path,
         checkpoint_dir: Path,
         bm25s_dir: Path,
         faiss_dir: Path,
@@ -2503,7 +2512,8 @@ class AnalysisEngine:
         force: bool = False,
     ):
         self.work_dir = Path(work_dir)
-        self.analysis_file = Path(analysis_file)
+        # wjo277: removed path() from analysis_file
+        self.analysis_file = analysis_file
         self.checkpoint_dir = Path(checkpoint_dir)
         self.max_files = max_files
         self.force = force

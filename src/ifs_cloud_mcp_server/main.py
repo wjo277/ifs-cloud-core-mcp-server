@@ -721,6 +721,9 @@ def handle_bm25s_reindex_command(args) -> int:
         from .analysis_engine import AnalysisEngine
         from .directory_utils import setup_analysis_engine_directories
         import json
+        #wjo277 added hashlib + time
+        import hashlib
+        import time
 
         # Set up all required directories using centralized function
         work_dir, checkpoint_dir, bm25s_dir, faiss_dir, analysis_file = (
@@ -755,14 +758,17 @@ def handle_bm25s_reindex_command(args) -> int:
         framework = AnalysisEngine(
             work_dir=work_dir,
             analysis_file=analysis_file,
+           # pagerank_file=pagerank_file,
             checkpoint_dir=checkpoint_dir,
             bm25s_dir=bm25s_dir,
             faiss_dir=faiss_dir,
             max_files=args.max_files,
         )
-
+        #pagerank_file = get_version_base_directory("25.1.3") / "ranked.jsonl"
+        #analysis_file = pagerank_file
         # Get file rankings for BM25S indexing
-        if args.analysis_file.endswith(".jsonl"):
+        #wjo277 removed args. before analysis_file.endswith
+        if analysis_file.name.endswith(".jsonl"):
             # Load JSONL format (e.g., ranked.jsonl from PageRank calculation)
             file_rankings = []
             with open(analysis_file, "r", encoding="utf-8") as f:
@@ -774,7 +780,8 @@ def handle_bm25s_reindex_command(args) -> int:
             # Load JSON format (e.g., comprehensive_plsql_analysis.json)
             with open(analysis_file, "r", encoding="utf-8") as f:
                 analysis_data = json.load(f)
-            file_rankings = analysis_data.get("file_rankings", [])
+            #file_rankings = analysis_data.get("file_rankings", [])
+            file_rankings = analysis_data.get("file_info", [])
             logging.info(f"📋 Loaded {len(file_rankings)} files from JSON format")
 
         if args.max_files:
@@ -800,6 +807,8 @@ def handle_bm25s_reindex_command(args) -> int:
 
             try:
                 # Read full file content
+                #wjo277 added start_time
+                start_time = time.time()
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     full_content = f.read()
 
@@ -807,7 +816,8 @@ def handle_bm25s_reindex_command(args) -> int:
                 from .analysis_engine import ProcessingResult, FileMetadata
 
                 file_metadata = FileMetadata(
-                    rank=file_info["rank"],
+                    #wjo277: rank removed
+                    #rank=file_info["rank"],
                     file_path=str(file_path),
                     relative_path=file_info["relative_path"],
                     file_name=file_info["file_name"],
@@ -819,12 +829,19 @@ def handle_bm25s_reindex_command(args) -> int:
                     ),
                 )
 
+                #wjo277: added processing_time and content_hash
+                processing_time = time.time() - start_time
+                content_hash = hashlib.md5(full_content.encode("utf-8")).hexdigest()
+
                 # Create processing result
                 processing_result = ProcessingResult(
                     file_metadata=file_metadata,
                     content_excerpt=full_content[:1000] if full_content else "",
                     summary="BM25S indexing",
                     success=True,
+                    #wjo277: added processing_time and content_hash,
+                    processing_time=processing_time, 
+                    content_hash=content_hash
                 )
 
                 # Add to BM25S index with full content
@@ -842,7 +859,9 @@ def handle_bm25s_reindex_command(args) -> int:
 
         # Build the BM25S index
         logging.info("🔨 Building BM25S index with enhanced preprocessing...")
-        success = bm25s_indexer.build_advanced_index()
+        #wjo277 changed from build_advanced_index to build_index
+        #success = bm25s_indexer.build_advanced_index()
+        success = bm25s_indexer.build_index()
 
         if success:
             logging.info("✅ BM25S index rebuilt successfully!")
